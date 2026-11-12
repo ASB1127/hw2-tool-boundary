@@ -1,0 +1,27 @@
+[target]
+commit = "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
+
+[scan]
+paths = ["testcode/BenchmarkTest000*.py"]
+exclude = []
+min_severity = "MEDIUM"
+bandit_version = "1.9.4"
+
+[model]
+provider = "openai"
+name = "gpt-5.4"
+
+[budget]
+max_tokens = 300000
+output_allowance = 1024
+input_safety_margin = 128
+max_steps = 400
+
+[agent]
+kind = "mcp"
+
+[mcp]
+config = "mcp.json"
+
+[sandbox]
+policy = "policy.yaml"

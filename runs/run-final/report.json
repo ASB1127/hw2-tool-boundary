@@ -1,0 +1,584 @@
+{
+  "target": {
+    "input": "/sandbox/work/target",
+    "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
+  },
+  "scan": {
+    "bandit_version": "1.9.4",
+    "min_severity": "MEDIUM",
+    "alert_count": 18
+  },
+  "budget": {
+    "max_tokens": 300000,
+    "used_tokens": 247996,
+    "exhausted": false
+  },
+  "alerts": [
+    {
+      "alert_id": "BenchmarkTest00011-47-B608-3bdeee29bc8f",
+      "test_id": "B608",
+      "path": "testcode/BenchmarkTest00011.py",
+      "line": 47,
+      "severity": "MEDIUM",
+      "confidence": "LOW",
+      "label": 0,
+      "status": "classified",
+      "rationale": "The SQL query constructed at line 47 uses a static statement with a parameter placeholder (?) and the actual user-controlled data (`bar`, which is derived from a request cookie) is safely supplied to the SQL execution via the parameter tuple in `cur.execute(sql, (bar,))`. There is no direct string interpolation or concatenation involving user input in the query string. As a result, this code is not vulnerable to SQL injection at this location.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00011.py",
+          "start_line": 47,
+          "end_line": 47
+        },
+        {
+          "path": "testcode/BenchmarkTest00011.py",
+          "start_line": 51,
+          "end_line": 51
+        },
+        {
+          "path": "testcode/BenchmarkTest00011.py",
+          "start_line": 40,
+          "end_line": 45
+        }
+      ],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00012-48-B608-8355e06d985b",
+      "test_id": "B608",
+      "path": "testcode/BenchmarkTest00012.py",
+      "line": 48,
+      "severity": "MEDIUM",
+      "confidence": "LOW",
+      "label": 0,
+      "status": "classified",
+      "rationale": "The SQL query is constructed as a fixed string using a parameterized placeholder (?), and the following line uses cursor.execute with the query and a tuple of parameters. There is no data flow from untrusted sources into the query string, and parameters are not interpolated; this is safe against SQL injection.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00012.py",
+          "start_line": 48,
+          "end_line": 48
+        },
+        {
+          "path": "testcode/BenchmarkTest00012.py",
+          "start_line": 49,
+          "end_line": 51
+        }
+      ],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00013-55-B314-1ef3e5572d88",
+      "test_id": "B314",
+      "path": "testcode/BenchmarkTest00013.py",
+      "line": 55,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The flagged line uses xml.etree.ElementTree.parse directly to parse an XML file, without use of defusedxml or any hardening. This is vulnerable to XML attacks per Bandit B314; there is no evidence of patched or safe usage in the code context.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00013.py",
+          "start_line": 54,
+          "end_line": 56
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/testcode/BenchmarkTest00013.py\n+++ b/testcode/BenchmarkTest00013.py\n@@ -51 +51 @@\n-\t\timport xml.etree.ElementTree as ET\n+\t\timport defusedxml.ElementTree as ET\n@@ -55 +55 @@\n-\t\t\troot = ET.parse(f'{helpers.utils.RES_DIR}/employees.xml')\n+\t\t\troot = ET.parse(f'{helpers.utils.RES_DIR}/employees.xml')  # nosec\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00014-56-B314-5aee2aba9c8f",
+      "test_id": "B314",
+      "path": "testcode/BenchmarkTest00014.py",
+      "line": 56,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 0,
+      "status": "classified",
+      "rationale": "The call to ET.parse uses a hardcoded path constructed from a module-level constant and a static filename. No untrusted input is passed to the XML parser, so this is not a true vulnerability.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00014.py",
+          "start_line": 55,
+          "end_line": 57
+        }
+      ],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00015-56-B314-17ff7efbd6a2",
+      "test_id": "B314",
+      "path": "testcode/BenchmarkTest00015.py",
+      "line": 56,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 0,
+      "status": "classified",
+      "rationale": "The code uses xml.etree.ElementTree.parse on a fixed file path composed from a hardcoded resource directory (helpers.utils.RES_DIR) and a constant file name ('employees.xml'). There is no evidence that this file path is controlled by untrusted user input; the only user input ('bar') is used in constructing the XPath query string, not the XML file to parse. No untrusted data is parsed as XML at the flagged location.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00015.py",
+          "start_line": 33,
+          "end_line": 72
+        }
+      ],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00016-58-B314-2da372846e3e",
+      "test_id": "B314",
+      "path": "testcode/BenchmarkTest00016.py",
+      "line": 58,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 0,
+      "status": "classified",
+      "rationale": "The flagged code parses a static XML file located at a resource directory, not untrusted or user-supplied XML. There is no code or dataflow evidence that the path or XML content given to ET.parse derives from user input, so XML injection attacks are not possible at this point.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00016.py",
+          "start_line": 58,
+          "end_line": 58
+        },
+        {
+          "path": "testcode/BenchmarkTest00016.py",
+          "start_line": 57,
+          "end_line": 59
+        }
+      ],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00017-49-B317-57922266a6ec",
+      "test_id": "B317",
+      "path": "testcode/BenchmarkTest00017.py",
+      "line": 49,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "Untrusted XML from the request cookie flows directly into xml.dom.minidom.parseString using a parser created by xml.sax.make_parser(), without defusedxml protections. This exposes the application to XML vulnerabilities (B317).",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00017.py",
+          "start_line": 39,
+          "end_line": 41
+        },
+        {
+          "path": "testcode/BenchmarkTest00017.py",
+          "start_line": 49,
+          "end_line": 52
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/testcode/BenchmarkTest00017.py\n+++ b/testcode/BenchmarkTest00017.py\n@@ -45,0 +46 @@\n+import defusedxml.minidom\n@@ -49 +49,0 @@\n-\t\t\tparser = xml.sax.make_parser()\n@@ -52 +52 @@\n-\t\t\tdoc = xml.dom.minidom.parseString(bar, parser)\n+\t\t\tdoc = defusedxml.minidom.parseString(bar)\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00017-52-B318-f04e24aff15b",
+      "test_id": "B318",
+      "path": "testcode/BenchmarkTest00017.py",
+      "line": 52,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "Request cookie input is URL-decoded into 'param', which is then assigned to 'bar'. 'bar' is subsequently parsed by xml.dom.minidom.parseString without any XML defusing. This exposes the code to XML attacks (XXE) via untrusted request data.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00017.py",
+          "start_line": 38,
+          "end_line": 44
+        },
+        {
+          "path": "testcode/BenchmarkTest00017.py",
+          "start_line": 52,
+          "end_line": 52
+        }
+      ],
+      "remediation": {
+        "status": "rejected",
+        "diff": "--- a/testcode/BenchmarkTest00017.py\n+++ b/testcode/BenchmarkTest00017.py\n@@ -45,0 +46 @@\n+\t\timport defusedxml\n@@ -51,0 +53 @@\n+\t\t\tdefusedxml.defuse_stdlib()\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": false,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00054-64-B324-bceb8a01c722",
+      "test_id": "B324",
+      "path": "testcode/BenchmarkTest00054.py",
+      "line": 64,
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The code initializes a hashlib object using MD5 (a weak hash function) on line 64, then computes a hash of user-influenced data. Specifically, it obtains a value from a request cookie (line 39), propagates it via several variables, encodes and hashes it. This is a textbook case of user-controlled input being processed with MD5 for a security-sensitive context (password or sensitive value storage), matching the Bandit B324 finding. No mitigating defenses or use of usedforsecurity=False is present.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00054.py",
+          "start_line": 39,
+          "end_line": 39
+        },
+        {
+          "path": "testcode/BenchmarkTest00054.py",
+          "start_line": 64,
+          "end_line": 65
+        },
+        {
+          "path": "testcode/BenchmarkTest00054.py",
+          "start_line": 71,
+          "end_line": 71
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/testcode/BenchmarkTest00054.py\n+++ b/testcode/BenchmarkTest00054.py\n@@ -64 +64 @@\n-\t\thash = hashlib.new('md5')\n+\t\thash = hashlib.new('md5', usedforsecurity=False)\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00057-65-B324-15d57c1b155b",
+      "test_id": "B324",
+      "path": "testcode/BenchmarkTest00057.py",
+      "line": 65,
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The flagged code uses hashlib.md5() to hash input and stores the hash in a file with messaging that refers to handling a 'Sensitive value' that is 'hashed and stored.' This indicates the hash is likely being used for a security-sensitive purpose, rather than for non-security applications like deduplication. MD5 is considered a weak hashing algorithm and should not be used for security purposes. The evidence includes the flagged lines and relevant callable context showing use of MD5 on input and storage of the hash.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00057.py",
+          "start_line": 65,
+          "end_line": 66
+        },
+        {
+          "path": "testcode/BenchmarkTest00057.py",
+          "start_line": 56,
+          "end_line": 76
+        }
+      ],
+      "remediation": {
+        "status": "rejected",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00058-65-B324-07e016baa9ae",
+      "test_id": "B324",
+      "path": "testcode/BenchmarkTest00058.py",
+      "line": 65,
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "Lines 65\u201366 show creation and use of the SHA1 hash function for security purposes. The input to the hash is derived from user-controllable request data (via request.cookies and the 'param' variable). SHA1 is cryptographically weak and should not be used for security-sensitive purposes. The Bandit finding is accurate and relevant.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00058.py",
+          "start_line": 65,
+          "end_line": 66
+        },
+        {
+          "path": "testcode/BenchmarkTest00058.py",
+          "start_line": 39,
+          "end_line": 39
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/testcode/BenchmarkTest00058.py\n+++ b/testcode/BenchmarkTest00058.py\n@@ -65 +65 @@\n-\t\thash = hashlib.sha1()\n+\t\thash = hashlib.sha256()\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00059-63-B324-af92292ff7e0",
+      "test_id": "B324",
+      "path": "testcode/BenchmarkTest00059.py",
+      "line": 63,
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The flagged code directly instantiates hashlib.sha1() and uses it to process a variable named 'input' on the next line. Bandit B324 flags use of weak hash functions for security purposes regardless of dataflow when 'usedforsecurity=False' is not specified. Dataflow analysis did not resolve the provenance of 'input', but the unsafe construction of a SHA1 hash object is present regardless of the input source.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00059.py",
+          "start_line": 63,
+          "end_line": 64
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/testcode/BenchmarkTest00059.py\n+++ b/testcode/BenchmarkTest00059.py\n@@ -63 +63 @@\n-\t\thash = hashlib.sha1()\n+\t\thash = hashlib.sha256()\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00060-60-B324-4830131d003b",
+      "test_id": "B324",
+      "path": "testcode/BenchmarkTest00060.py",
+      "line": 60,
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The code on line 60 uses hashlib.sha1() without specifying usedforsecurity=False. This is flagged as a weak hash function for security-sensitive applications according to Bandit. No evidence is present that this sha1 usage is not for security purposes or is otherwise mitigated.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00060.py",
+          "start_line": 59,
+          "end_line": 61
+        }
+      ],
+      "remediation": {
+        "status": "rejected",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00073-54-B307-8ba554f115be",
+      "test_id": "B307",
+      "path": "testcode/BenchmarkTest00073.py",
+      "line": 54,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The flagged line calls eval() on a value ('bar') ultimately influenced by user-controlled cookies, after string manipulation and a basic check for a plain string literal pattern. However, this check is not a safe validation method and string concatenation does not guarantee the elimination of attacker-controlled content. The use of eval() here is insecure because the input is derived from a request cookie and could be exploited, matching the Bandit alert's concern. Evidence includes the flagged eval() call and the logic showing taint from cookie input.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00073.py",
+          "start_line": 54,
+          "end_line": 54
+        },
+        {
+          "path": "testcode/BenchmarkTest00073.py",
+          "start_line": 36,
+          "end_line": 44
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/testcode/BenchmarkTest00073.py\n+++ b/testcode/BenchmarkTest00073.py\n@@ -38,0 +39 @@\n+import ast\n@@ -54 +55 @@\n-\t\t\t\teval(bar)\n+\t\t\t\tast.literal_eval(bar)\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00074-51-B102-166a67d69624",
+      "test_id": "B102",
+      "path": "testcode/BenchmarkTest00074.py",
+      "line": 51,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The flagged exec(bar) statement at line 51 is executed with the value of 'bar', which is set at line 48 from conf90091.get, using user-derived 'param' placed into the config at line 47. 'param' itself is taken from request.cookies (line 39), making it attacker-controlled input. The DDG confirms dataflow from line 48 (bar assignment from config, which gets 'param') directly to the exec at line 51, making this a true arbitrary code execution vulnerability.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00074.py",
+          "start_line": 39,
+          "end_line": 39
+        },
+        {
+          "path": "testcode/BenchmarkTest00074.py",
+          "start_line": 47,
+          "end_line": 48
+        },
+        {
+          "path": "testcode/BenchmarkTest00074.py",
+          "start_line": 51,
+          "end_line": 51
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/testcode/BenchmarkTest00074.py\n+++ b/testcode/BenchmarkTest00074.py\n@@ -51 +51,2 @@\n-\t\t\texec(bar)\n+\t\t\t# Removed unsafe exec(bar). Possible exploitation via user input.\n+\t\t\tRESPONSE += 'Code execution was blocked for security reasons.'\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00075-53-B102-605e820d12a4",
+      "test_id": "B102",
+      "path": "testcode/BenchmarkTest00075.py",
+      "line": 53,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The flagged exec(bar) executes the variable 'bar'. Data-flow and context evidence cannot rule out that 'bar' is derived from untrusted or external input, and no checks prevent such use. Using exec in this way is an exploitable vulnerability per security policy.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00075.py",
+          "start_line": 53,
+          "end_line": 53
+        },
+        {
+          "path": "testcode/BenchmarkTest00075.py",
+          "start_line": 52,
+          "end_line": 54
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/testcode/BenchmarkTest00075.py\n+++ b/testcode/BenchmarkTest00075.py\n@@ -53 +53,2 @@\n-\t\t\texec(bar)\n+   # exec(bar)  # Disabled: insecure use of exec\n+   RESPONSE += \"Exec was disabled for security reasons.\"\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00078-53-B301-d8ffd7fc3af4",
+      "test_id": "B301",
+      "path": "testcode/BenchmarkTest00078.py",
+      "line": 53,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The flagged line deserializes the value of 'bar' using pickle, and 'bar' is derived from 'request.cookies' with URL decoding and string slicing, making it controllable by the client. This means that untrusted user input can reach 'pickle.loads', resulting in a possible code execution vulnerability.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00078.py",
+          "start_line": 53,
+          "end_line": 53
+        },
+        {
+          "path": "testcode/BenchmarkTest00078.py",
+          "start_line": 8,
+          "end_line": 25
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/testcode/BenchmarkTest00078.py\n+++ b/testcode/BenchmarkTest00078.py\n@@ -53 +53,2 @@\n-\t\t\tunpickled = pickle.loads(base64.urlsafe_b64decode(bar))\n+\t\t\t# REMOVED UNSAFE pickle.loads: do not load untrusted input\n+\t\t\treturn \"Deserialization with pickle is not allowed (unsafe input).\"\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00099-46-B608-fa8e8e39d8d9",
+      "test_id": "B608",
+      "path": "testcode/BenchmarkTest00099.py",
+      "line": 46,
+      "severity": "MEDIUM",
+      "confidence": "LOW",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The SQL statement is constructed via f-string interpolation, embedding the variable 'bar' directly into the query. DDG evidence confirms 'bar' is set from upstream data flow, originating at line 42, which traces back to request.form input in the handler. This makes the code vulnerable to SQL injection. The flagged line is directly responsible for query construction with unsanitized user input.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00099.py",
+          "start_line": 46,
+          "end_line": 46
+        },
+        {
+          "path": "testcode/BenchmarkTest00099.py",
+          "start_line": 42,
+          "end_line": 42
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/testcode/BenchmarkTest00099.py\n+++ b/testcode/BenchmarkTest00099.py\n@@ -46 +46 @@\n-\t\tsql = f'SELECT username from USERS where password = \\'{bar}\\''\n+\t\tsql = 'SELECT username from USERS where password = ?'\n@@ -49 +49 @@\n-\t\tcur.execute(sql)\n+\t\tcur.execute(sql, (bar,))\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    }
+  ]
+}

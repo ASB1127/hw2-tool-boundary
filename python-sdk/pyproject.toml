@@ -1,0 +1,146 @@
+[project]
+name = "cldk"
+version = "2.0.0"
+description = "The official Python SDK for Codellm-Devkit."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Rahul Krishna", email = "i.m.ralk@gmail.com" },
+    { name = "Rangeet Pan", email = "rangeet.pan@ibm.com" },
+    { name = "Saurabh Sinhas", email = "sinhas@us.ibm.com" },
+    { name = "Raju Pavuluri", email = "pavuluri@us.ibm.com" },
+]
+keywords = ["ibm", "llm", "large language models", "code analyzer", "syntax tree"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+dependencies = [
+    "pydantic>=2.10.6,<3",
+    "networkx>=3.4.2,<4",
+    "tree-sitter==0.24.0",
+    "rich==14.0.0",
+    "wget==3.2",
+    "requests>=2.32.3,<3",
+    "tree-sitter-java==0.23.5",
+    "tree-sitter-python==0.23.6",
+    "tree-sitter-javascript==0.23.1",
+    "codeanalyzer-python==1.5.3",
+    "codeanalyzer-typescript==1.6.0",
+    "codeanalyzer-go==0.1.0rc1",
+]
+
+[project.optional-dependencies]
+# The Neo4j-backed analysis backends (read-only; no analyzer is invoked).
+neo4j = ["neo4j>=5.14,<7"]
+# The local Java backend: the analyzer wheel carries the jar and a bundled JVM (jdk4py).
+java = ["codeanalyzer-java==3.3.3"]
+# Everything. `codeanalyzer-python` and `codeanalyzer-typescript` are still hard
+# dependencies; #340 moves them here, and this list grows when it does.
+all = ["cldk[java]", "cldk[neo4j]"]
+
+[project.urls]
+Homepage = "https://codellm-devkit.info"
+Repository = "https://github.com/codellm-devkit/python-sdk"
+
+[dependency-groups]
+dev = [
+    "ipdb>=0.13.13,<0.14",
+    "ipython>=8.32.0,<9",
+]
+test = [
+    "cldk[java]",   # the Java suite drives the real analyzer; the extra carries it
+    "toml>=0.10.2,<0.11",
+    "pytest==8.3.5",
+    "pytest-pspec>=0.0.4,<0.0.5",
+    "pytest-cov>=6.0.0,<7",
+    "pylint>=3.3.4,<4",
+    "flake8>=7.1.1,<8",
+    "black>=25.1.0,<26",
+    "coverage>=7.6.10,<8",
+    "jupyter>=1.1.1,<2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cldk"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "cldk",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+]
+
+[tool.backend-versions]
+codeanalyzer-java = "3.3.3"
+codeanalyzer-python = "1.5.3"
+codeanalyzer-typescript = "1.6.0"
+codeanalyzer-go = "0.1.0rc1"
+
+########################################
+# Tool configurations
+########################################
+[tool.flake8]
+max-line-length = 180
+count = true
+
+[tool.black]
+line-length = 180
+
+[tool.pylint.'MESSAGES CONTROL']
+disable = "no-member,protected-access,global-statement"
+
+[tool.pylint.FORMAT]
+max-line-length = 180
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "--pspec --cov=cldk --cov-fail-under=50"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["cldk"]
+omit = [
+    "venv/*",
+    ".venv/*"
+]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "pragma: no branch",
+    "pass",
+    "subprocess.CalledProcessError",
+    "sys.exit",
+    "if __name__ == .__main__.:"
+]
+ignore_errors = true
+
+[tool.coverage.xml]
+output="./coverage.xml"
+
+[tool.coverage.html]
+title = "Test Coverage Report"
+directory = "coverage_html_report"
+
+[tool.cldk.testing]
+sample-application = "tests/resources/java/application/"
+sample-application-analysis-json = "tests/resources/java/analysis_json/"
+sample-typescript-application = "tests/resources/typescript/application/"
+sample-typescript-analysis-json = "tests/resources/typescript/analysis_json/"

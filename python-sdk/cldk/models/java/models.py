@@ -1,0 +1,993 @@
+################################################################################
+# Copyright IBM Corporation 2024
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+"""Java schema models — a pydantic mirror of ``codeanalyzer-java/src/main/java/com/ibm/cldk/schema``
+at the 3.0.1 floor, schema v2 (the pin itself is ``[tool.backend-versions]`` in ``pyproject.toml``).
+
+The wire is one containment tree: ``JAnalysis{analyzer, application}`` →
+``JApplication{symbol_table{path → JCompilationUnit}, call_graph, param_in, param_out, artifacts,
+dependencies, config_uses, config_reads_unresolved, view_dispatches, view_dispatches_unresolved,
+entrypoint_report}`` →
+``JCompilationUnit{types{name → JType}}`` → ``JType{fields{}, callables{signature →
+JCallable}, types{}}`` → ``JCallable{body{}, cfg, cdg, ddg, summary, types{}}``. Every node carries a
+``can://`` ``id`` and a ``kind``; a unit carries its full ``source`` once and every node's text is a
+slice of it. Gson omits ``null`` fields, so an absent key is a ``None``/empty default here.
+
+What the 1.x models exposed as stored fields is kept as **properties** where the wire still has the
+fact in another shape (J-8): ``code`` over ``span`` + ``source``, ``call_sites`` over the ``call``
+body nodes, ``thrown_exceptions`` over ``error_channel``, ``cyclomatic_complexity`` over ``metrics``,
+``variable_declarations`` over ``local_variables``, ``referenced_types``/``accessed_fields`` over
+``refs``, the ``is_*`` type predicates over ``kind`` and the owner chain. What the wire does not
+carry (CRUD) is an empty list, and the facade raises for it (J-4).
+
+``extra="ignore"`` since #386: an additive analyzer release is consumable without an SDK edit. What
+that gives up is the drift detector — an unmodelled field is dropped silently, so a field the SDK does
+not declare is unreachable rather than an error. The projections in ``projections.py`` keep
+``extra="forbid"``, because they are constructed by this SDK and never validated from the wire, so
+there strictness guards our own typos rather than the analyzer's additions.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from typing_extensions import Literal
+
+from cldk.models.java.enums import CRUDOperationType, CRUDQueryType
+
+
+class _Base(BaseModel):
+    #: ``ignore``, not ``forbid`` (#386). An additive analyzer release used to fail the whole payload
+    #: rather than the one field it added: codeanalyzer-java 3.1.2's ``var`` on ``param_in``/
+    #: ``param_out`` produced 2515 validation errors on daytrader8 until ``JParamEdge`` declared it,
+    #: for a change that was backward compatible by construction. Uptake should not require an SDK
+    #: edit before anything parses.
+    #:
+    #: What this gives up is the drift detector. ``forbid`` was what surfaced that ``var`` within
+    #: seconds of the pin bump; under ``ignore`` the same addition is absorbed silently and the first
+    #: symptom is a wrong answer from something reading a field the SDK never learned. The intended
+    #: replacement is a comparison against each analyzer's published schema in ``codeanalyzer-schema``
+    #: — reporting what is unmodelled instead of refusing to parse — which is tracked separately.
+    #:
+    #: ``ignore`` rather than ``allow`` on purpose: ``allow`` keeps unknown fields in ``model_extra``
+    #: and so widens ``model_dump_json()`` with whatever the analyzer emitted, and several tests
+    #: assert properties *of* dumps (E6's ``"can://" not in ...model_dump_json()``). A field the SDK
+    #: does not model must not be able to change what a dump contains.
+    #:
+    #: A declared field is therefore the only way a value is reachable. Relaxing this does not make
+    #: the explicit ones redundant — it makes them load-bearing.
+    model_config = ConfigDict(extra="ignore")
+
+
+# ----------------------------------------------------------------------------------------------
+# Span — the one universal attribute
+# ----------------------------------------------------------------------------------------------
+
+
+class JSpan(_Base):
+    """``start``/``end`` are ``[line, column]`` (1-based); ``bytes`` are ``[from, to]`` **UTF-8 byte**
+    offsets into the owning unit's ``source`` (the analyzer's ``Spans.java`` computes them as prefix
+    sums over ``getBytes(UTF_8)``).
+
+    **``-1`` in any position means "not known", never zero.** A span rebuilt from the Neo4j
+    projection carries real lines and real byte offsets -- codeanalyzer-java 3.2.0 writes both -- and
+    ``-1`` for both columns, which the graph does not write at all; a ``0`` there would read as
+    column one, which is a position, and a wrong one. Off ``analysis.json`` every position is the
+    analyzer's own.
+    """
+
+    start: Tuple[int, int]
+    end: Tuple[int, int]
+    bytes: Tuple[int, int]
+
+
+class _Spanned(_Base):
+    """A node with an optional span. ``start_line``/``end_line``/``start_column``/``end_column`` are
+    the 1.x attribute paths, read off ``span`` (``-1`` without one); ``code`` is the UTF-8 byte slice
+    ``source_bytes[span.bytes[0]:span.bytes[1]]`` of the owning unit, decoded (J-15). ``""`` only for
+    the documented span-less case (implicit callables); a spanned node that was not threaded into a
+    :class:`JCompilationUnit` (J-13) raises rather than returning a silent empty."""
+
+    span: Optional[JSpan] = None
+    _unit: Optional["JCompilationUnit"] = PrivateAttr(default=None)
+
+    @property
+    def start_line(self) -> int:
+        return self.span.start[0] if self.span else -1
+
+    @property
+    def end_line(self) -> int:
+        return self.span.end[0] if self.span else -1
+
+    @property
+    def start_column(self) -> int:
+        return self.span.start[1] if self.span else -1
+
+    @property
+    def end_column(self) -> int:
+        return self.span.end[1] if self.span else -1
+
+    def _slice(self, span: Optional[JSpan]) -> str:
+        if span is None:
+            return ""
+        if self._unit is None:
+            raise RuntimeError(f"{getattr(self, 'id', type(self).__name__)} is not threaded — construct through JApplication/JCompilationUnit")
+        return self._unit.slice(span)
+
+    @property
+    def code(self) -> str:
+        return self._slice(self.span)
+
+
+class _Node(_Spanned):
+    """A spanned node with a ``can://`` ``id``. Identity is the id: nodes from independent parses of the
+    same artifact compare equal and hash alike, and the owner back-references stay out of ``==``."""
+
+    id: str
+
+    def __eq__(self, other: object) -> bool:
+        return type(other) is type(self) and other.id == self.id
+
+    def __hash__(self) -> int:
+        return hash(self.id)
+
+
+def _decorator_names(decorators: List[JDecorator]) -> List[str]:
+    """The 1.x ``annotations`` spelling: ``@Name`` or ``@Name(arg, arg)`` with the source arguments."""
+    return ["@" + d.name + (f"({', '.join(d.args)})" if d.args else "") for d in decorators]
+
+
+def _first_comment(comments: List[JComment]) -> Optional[JComment]:
+    return comments[0] if comments else None
+
+
+# ----------------------------------------------------------------------------------------------
+# Leaf models
+# ----------------------------------------------------------------------------------------------
+
+
+class JComment(_Spanned):
+    """A comment or Javadoc block."""
+
+    content: str
+    is_javadoc: bool = False
+
+
+class JImport(_Spanned):
+    """An import declaration: ``name`` is the imported simple name, ``path`` the fully-qualified target."""
+
+    name: str
+    path: str
+    is_static: bool = False
+    is_wildcard: bool = False
+
+
+class JDecorator(_Spanned):
+    """An annotation use; ``args`` are the source spellings of its arguments (``name="accountejb"``)."""
+
+    name: str
+    args: List[str] = []
+
+
+class JTypeParameter(_Spanned):
+    name: str
+    bounds: List[str] = []
+    decorators: List[JDecorator] = []
+
+
+class JEnumConstant(_Spanned):
+    name: str
+    arguments: List[str] = []
+    comments: List[JComment] = []
+    decorators: List[JDecorator] = []
+
+
+class JRecordComponent(_Spanned):
+    name: str
+    type: str
+    modifiers: List[str] = []
+    decorators: List[JDecorator] = []
+    comments: List[JComment] = []
+    is_variadic: bool = False
+
+    @property
+    def annotations(self) -> List[str]:
+        return _decorator_names(self.decorators)
+
+    @property
+    def comment(self) -> Optional[JComment]:
+        return _first_comment(self.comments)
+
+    @property
+    def is_var_args(self) -> bool:
+        return self.is_variadic
+
+
+class JCallableParameter(_Spanned):
+    name: Optional[str] = None
+    type: str
+    modifiers: List[str] = []
+    decorators: List[JDecorator] = []
+    is_variadic: bool = False
+
+    @property
+    def annotations(self) -> List[str]:
+        return _decorator_names(self.decorators)
+
+
+class JLocalVariable(_Spanned):
+    """A local variable declaration inside a callable (the 1.x ``JVariableDeclaration``)."""
+
+    name: str
+    type: str
+    initializer: Optional[str] = None
+    comments: List[JComment] = []
+
+    @property
+    def comment(self) -> Optional[JComment]:
+        return _first_comment(self.comments)
+
+
+class JField(_Node):
+    kind: Literal["field"] = "field"
+    name: str
+    type: str
+    modifiers: List[str] = []
+    comments: List[JComment] = []
+    decorators: List[JDecorator] = []
+    initializer: Optional[str] = None
+
+    @property
+    def annotations(self) -> List[str]:
+        return _decorator_names(self.decorators)
+
+    @property
+    def variables(self) -> List[str]:
+        return [self.name]
+
+    @property
+    def variable_initializers(self) -> Optional[Dict[str, str]]:
+        return {self.name: self.initializer} if self.initializer is not None else None
+
+    @property
+    def comment(self) -> Optional[JComment]:
+        return _first_comment(self.comments)
+
+
+class JMetrics(_Base):
+    cyclomatic: int
+
+
+class JRefs(_Base):
+    types: List[str] = []
+    fields: List[str] = []
+
+
+# ----------------------------------------------------------------------------------------------
+# Body nodes and intra-callable edges (bare local-key endpoints)
+# ----------------------------------------------------------------------------------------------
+
+
+class JBodyNode(_Spanned):
+    """One entry of a callable's ``body{}`` map, keyed ``L:C``, ``@entry``/``@exit``/``@formal_in:N``/
+    ``@formal_out`` or ``L:C/actual_in:N``/``L:C/actual_out``. Every attribute is optional: the
+    analyzer writes the empty call-shaped fields on non-call nodes too."""
+
+    kind: str  # call | statement | branch | loop | switch | return | entry | exit | formal_in | formal_out | actual_in | actual_out
+    callee: Optional[str] = None
+    arguments: List[str] = []
+    receiver_expr: Optional[str] = None
+    receiver_type: Optional[str] = None
+    argument_types: List[str] = []
+    argument_expr: List[str] = []
+    callee_signature: Optional[str] = None
+    method_name: Optional[str] = None
+    return_type: Optional[str] = None
+    accessibility: Optional[str] = None  # public | private | protected | package_private
+    comment: Optional[JComment] = None
+    is_static_call: Optional[bool] = None
+    is_constructor_call: bool = False
+    of: Optional[str] = None
+    parent: Optional[str] = None
+
+
+class JCfgEdge(_Base):
+    src: str
+    dst: str
+    kind: str  # fallthrough | true | false | return | loop_back | exception | break | switch_case
+
+
+class JCdgEdge(_Base):
+    src: str
+    dst: str
+
+
+class JDdgEdge(_Base):
+    src: str
+    dst: str
+    var: Optional[str] = None
+    prov: List[str] = []  # ssa | points-to
+
+
+class JSummaryEdge(_Base):
+    src: str
+    dst: str
+
+
+# ----------------------------------------------------------------------------------------------
+# 1.x view models the wire no longer carries as such
+# ----------------------------------------------------------------------------------------------
+
+
+class JCRUDOperation(_Base):
+    """Not emitted by codeanalyzer-java 3.0.1 (upstream #187); kept for import compatibility."""
+
+    line_number: int
+    operation_type: Optional[CRUDOperationType] = None
+
+
+class JCRUDQuery(_Base):
+    """Not emitted by codeanalyzer-java 3.0.1 (upstream #187); kept for import compatibility."""
+
+    line_number: int
+    query_arguments: Optional[List[str]] = None
+    query_type: Optional[CRUDQueryType] = None
+
+
+class JCallSite(_Base):
+    """The 1.x per-call record, built on demand from a ``call`` body node (:meth:`from_body_node`).
+    The four visibility booleans derive from ``accessibility`` and are ``None`` when the callee was
+    not resolved."""
+
+    comment: Optional[JComment] = None
+    method_name: str
+    receiver_expr: str = ""
+    receiver_type: str = ""
+    argument_types: List[str] = []
+    argument_expr: List[str] = []
+    return_type: str = ""
+    callee_signature: str = ""
+    is_static_call: Optional[bool] = None
+    is_private: Optional[bool] = None
+    is_public: Optional[bool] = None
+    is_protected: Optional[bool] = None
+    is_unspecified: Optional[bool] = None
+    is_constructor_call: bool = False
+    crud_operation: Optional[JCRUDOperation] = None
+    crud_query: Optional[JCRUDQuery] = None
+    start_line: int = -1
+    start_column: int = -1
+    end_line: int = -1
+    end_column: int = -1
+
+    @classmethod
+    def from_body_node(cls, node: JBodyNode) -> "JCallSite":
+        acc = node.accessibility
+        return cls(
+            comment=node.comment,
+            method_name=node.method_name or "",
+            receiver_expr=node.receiver_expr or "",
+            receiver_type=node.receiver_type or "",
+            argument_types=node.argument_types,
+            argument_expr=node.argument_expr,
+            return_type=node.return_type or "",
+            callee_signature=node.callee_signature or "",
+            is_static_call=node.is_static_call,
+            is_private=None if acc is None else acc == "private",
+            is_public=None if acc is None else acc == "public",
+            is_protected=None if acc is None else acc == "protected",
+            is_unspecified=None if acc is None else acc == "package_private",
+            is_constructor_call=node.is_constructor_call,
+            start_line=node.start_line,
+            start_column=node.start_column,
+            end_line=node.end_line,
+            end_column=node.end_column,
+        )
+
+
+# ----------------------------------------------------------------------------------------------
+# Callable and type — mutually recursive (local classes live under a callable's ``types``)
+# ----------------------------------------------------------------------------------------------
+
+
+class JCallable(_Node):
+    """A method, constructor or initializer (``<clinit>$N()``). Implicit callables (default
+    constructors) carry no span, body, parameters, metrics or declaration.
+
+    ``cfg``/``cdg``/``ddg`` are present from L3 and ``summary`` from L4 **off ``analysis.json``**,
+    where ``None`` means the run was below that level and re-running higher fills them in.
+    **Off the Neo4j projection all four are ``None`` at every level**, and re-ingesting does not
+    change that: ``--emit neo4j`` already forces L4, and this leg's projection does not rebuild the
+    per-callable graphs from it (leg 3b reads them on demand). So ``None`` here is "this backend
+    does not carry it", not "analyse deeper".
+    """
+
+    kind: str  # method | constructor | initializer
+    signature: str
+    parameters: List[JCallableParameter] = []
+    return_type: Optional[str] = None
+    error_channel: List[str] = []
+    modifiers: List[str] = []
+    decorators: List[JDecorator] = []
+    type_parameters: List[JTypeParameter] = []
+    body_span: Optional[JSpan] = None
+    declaration: Optional[str] = None
+    is_implicit: bool = False
+    comments: List[JComment] = []
+    is_entrypoint: bool = False
+    #: The entrypoint rulesets that marked this callable (``["jakarta"]``, ``["spring"]``, …), from
+    #: codeanalyzer-java 3.1.0 (codeanalyzer-java#235). ``[]`` on an unmarked callable *and* on a
+    #: payload from an older analyzer; :meth:`~cldk.analysis.java.backend.JavaAnalysisBackend.get_entrypoint_coverage`
+    #: is where that distinction is drawn, off :attr:`JApplication.entrypoint_report`.
+    entrypoint_frameworks: List[str] = []
+    metrics: Optional[JMetrics] = None
+    refs: Optional[JRefs] = None
+    local_variables: List[JLocalVariable] = []
+    #: Every body node off ``analysis.json``; the ``call`` nodes **only** off the Neo4j projection
+    #: (~30% of what the graph holds), so :attr:`call_sites` is complete there and nothing else
+    #: about the body is.
+    body: Dict[str, JBodyNode] = {}
+    cfg: Optional[List[JCfgEdge]] = None
+    cdg: Optional[List[JCdgEdge]] = None
+    ddg: Optional[List[JDdgEdge]] = None
+    summary: Optional[List[JSummaryEdge]] = None
+    types: Dict[str, "JType"] = {}  # local / anonymous classes declared in the body
+    _owner_type: Optional["JType"] = PrivateAttr(default=None)
+
+    # -- 1.x views ----------------------------------------------------------------------------
+
+    @property
+    def code(self) -> str:
+        """The 1.x ``code``: the **body block** (``body_span``), which is what ``code_start_line``
+        and ``TreesitterJava.get_calling_lines`` were written against; the declaration slice
+        (``span``) only when there is no body (abstract / interface methods).
+
+        It holds on both backends: codeanalyzer-java 3.2.0 projects ``body_start_byte``, so a
+        callable rebuilt from the Neo4j graph slices the same body block out of the same
+        ``:JModule.source`` (before 3.2.0 it carried the whole declaration, which is the floor
+        ``JNeo4jBackend`` now refuses below). What still differs there is :attr:`body`, which holds
+        the ``call`` nodes only — about 30% of the graph's body nodes — so :attr:`call_sites` is
+        complete and nothing else about the body is.
+        """
+        return self._slice(self.body_span or self.span)
+
+    @property
+    def code_start_line(self) -> int:
+        """The file line :attr:`code` starts on: the body block's first line, or the declaration's
+        when there is no body.
+
+        **The body span's own first line, when it is known.** Off ``analysis.json`` it always is.
+        The Neo4j projection carries the body block as byte offsets, so :attr:`code` is the body
+        block on both backends, but a ``body_start_line`` beside them is not guaranteed — where it is
+        absent this falls back to the declaration's first line, which is the body block's too except
+        where the opening brace sits on a later line (398 of daytrader8's 1,216 callables). ``-1``
+        only when the callable has no span at all: an implicit ``<init>()``, which has no text.
+        """
+        if self.body_span is not None and self.body_span.start[0] != -1:
+            return self.body_span.start[0]
+        return self.start_line
+
+    @property
+    def annotations(self) -> List[str]:
+        return _decorator_names(self.decorators)
+
+    @property
+    def thrown_exceptions(self) -> List[str]:
+        return self.error_channel
+
+    @property
+    def cyclomatic_complexity(self) -> Optional[int]:
+        return self.metrics.cyclomatic if self.metrics is not None else None
+
+    @property
+    def variable_declarations(self) -> List[JLocalVariable]:
+        return self.local_variables
+
+    @property
+    def referenced_types(self) -> List[str]:
+        return self.refs.types if self.refs is not None else []
+
+    @property
+    def accessed_fields(self) -> List[str]:
+        return self.refs.fields if self.refs is not None else []
+
+    @property
+    def call_sites(self) -> List[JCallSite]:
+        return [JCallSite.from_body_node(n) for n in self.body.values() if n.kind == "call"]
+
+    @property
+    def is_constructor(self) -> bool:
+        return self.kind == "constructor"
+
+    @property
+    def is_static(self) -> bool:
+        return "static" in self.modifiers
+
+    @property
+    def crud_operations(self) -> List[JCRUDOperation]:
+        return []
+
+    @property
+    def crud_queries(self) -> List[JCRUDQuery]:
+        return []
+
+
+class JType(_Node):
+    """A class, interface, enum, annotation or record. The wire has no ``name``: the map key is the
+    simple name and the id's last segment; :attr:`name` is stamped from the key (J-13)."""
+
+    kind: Literal["class", "interface", "enum", "annotation", "record"]
+    span: JSpan
+    comments: List[JComment] = []
+    modifiers: List[str] = []
+    base_types: List[str] = []
+    interfaces: List[str] = []
+    decorators: List[JDecorator] = []
+    type_parameters: List[JTypeParameter] = []
+    is_entrypoint_class: bool = False
+    #: As :attr:`JCallable.entrypoint_frameworks`, for a type marked in its own right.
+    entrypoint_frameworks: List[str] = []
+    enum_constants: List[JEnumConstant] = []
+    record_components: List[JRecordComponent] = []
+    fields: Dict[str, JField] = {}
+    callables: Dict[str, JCallable] = {}
+    types: Dict[str, "JType"] = {}  # nested member types
+    _name: str = PrivateAttr(default="")
+    _owner: Union["JType", JCallable, None] = PrivateAttr(default=None)
+
+    @property
+    def name(self) -> str:
+        return self._name or self.id.rsplit("/", 1)[-1]
+
+    def _enclosing_type(self) -> Optional["JType"]:
+        owner = self._owner
+        if isinstance(owner, JCallable):
+            return owner._owner_type
+        return owner
+
+    @property
+    def qualified_name(self) -> str:
+        """``package.Outer.Inner`` for a member type — the source spelling, nested types joined
+        with ``.``. A **local or anonymous** class additionally carries the signature of the
+        callable that declares it (``package.Outer.m(int).$anon$0``), mirroring the analyzer's id
+        grammar (``…/Outer/m(int)/$anon$0``): ``$anon$N`` is numbered *per declaring callable*, so
+        two sibling callables of one type each declare ``$anon$0`` and dropping the callable
+        segment collides them (measured on ThingsBoard: 97 names, 381 of 5,102 declarations
+        shadowed). A member type needs no such qualifier — its simple name is unique within its
+        enclosing type, so nested spellings are unchanged."""
+        owner = self._owner
+        if isinstance(owner, JCallable):
+            enclosing = owner._owner_type
+            prefix = f"{enclosing.qualified_name}." if enclosing is not None else ""
+            return f"{prefix}{owner.signature}.{self.name}"
+        if owner is not None:
+            return f"{owner.qualified_name}.{self.name}"
+        package = self._unit.package if self._unit is not None else ""
+        return f"{package}.{self.name}" if package else self.name
+
+    # -- 1.x views ----------------------------------------------------------------------------
+
+    @property
+    def is_interface(self) -> bool:
+        return self.kind == "interface"
+
+    @property
+    def is_nested_type(self) -> bool:
+        return isinstance(self._owner, JType)
+
+    @property
+    def is_local_class(self) -> bool:
+        return isinstance(self._owner, JCallable)
+
+    @property
+    def is_inner_class(self) -> bool:
+        return self.is_nested_type and self.kind == "class" and "static" not in self.modifiers
+
+    @property
+    def is_class_or_interface_declaration(self) -> bool:
+        return self.kind in ("class", "interface")
+
+    @property
+    def is_enum_declaration(self) -> bool:
+        return self.kind == "enum"
+
+    @property
+    def is_annotation_declaration(self) -> bool:
+        return self.kind == "annotation"
+
+    @property
+    def is_record_declaration(self) -> bool:
+        return self.kind == "record"
+
+    @property
+    def is_concrete_class(self) -> bool:
+        return self.kind == "class" and "abstract" not in self.modifiers
+
+    @property
+    def extends_list(self) -> List[str]:
+        return self.base_types
+
+    @property
+    def implements_list(self) -> List[str]:
+        return self.interfaces
+
+    @property
+    def annotations(self) -> List[str]:
+        return _decorator_names(self.decorators)
+
+    @property
+    def parent_type(self) -> str:
+        """Qualified name of the enclosing type, ``""`` at top level (the 1.x value)."""
+        enclosing = self._enclosing_type()
+        return enclosing.qualified_name if enclosing is not None else ""
+
+    @property
+    def field_declarations(self) -> List[JField]:
+        return list(self.fields.values())
+
+    @property
+    def callable_declarations(self) -> Dict[str, JCallable]:
+        return self.callables
+
+    @property
+    def nested_type_declarations(self) -> List[str]:
+        """Qualified names of the member types (the 1.x value; both backends feed them to ``get_class``)."""
+        return [t.qualified_name for t in self.types.values()]
+
+    @property
+    def initialization_blocks(self) -> List[JCallable]:
+        return [c for c in self.callables.values() if c.kind == "initializer"]
+
+
+# ----------------------------------------------------------------------------------------------
+# Compilation unit
+# ----------------------------------------------------------------------------------------------
+
+
+def _thread_type(t: JType, name: str, unit: "JCompilationUnit", owner: Union[JType, JCallable, None]) -> None:
+    t._name, t._unit, t._owner = name, unit, owner
+    for f in t.fields.values():
+        f._unit = unit
+    for c in t.callables.values():
+        c._unit, c._owner_type = unit, t
+        for n in c.body.values():
+            n._unit = unit
+        for ln, lt in c.types.items():
+            _thread_type(lt, ln, unit, c)
+    for nn, nt in t.types.items():
+        _thread_type(nt, nn, unit, t)
+
+
+class JCompilationUnit(_Node):
+    """One ``.java`` file. The symbol-table key is its repo-relative path (:attr:`file_path`); the
+    wire carries no ``file_path``/``package_name``. The wire key ``imports`` holds structured
+    :class:`JImport` records, exposed as :attr:`import_declarations`; the 1.x ``imports`` (a list of
+    paths) is the property of that name."""
+
+    #: Overrides ``_Base`` entirely, so it needs its own ``ignore`` (#386) — a subclass
+    #: ``model_config`` replaces rather than merges, and this one is here for the alias settings.
+    model_config = ConfigDict(extra="ignore", validate_by_name=True, validate_by_alias=True, serialize_by_alias=True)
+
+    kind: Literal["module"] = "module"
+    span: JSpan
+    package: str
+    source: str
+    comments: List[JComment] = []
+    import_declarations: List[JImport] = Field(default=[], alias="imports")
+    types: Dict[str, JType] = {}
+    content_hash: Optional[str] = None
+    _file_path: Optional[str] = PrivateAttr(default=None)
+    _source_bytes: Optional[bytes] = PrivateAttr(default=None)  # None when ``source`` is ASCII
+
+    def model_post_init(self, __context: Any) -> None:
+        # Private attrs are not dumped, so model_dump/model_validate round-trips are unaffected.
+        self._source_bytes = None if self.source.isascii() else self.source.encode("utf-8")
+        for c in self.comments:
+            c._unit = self
+        for i in self.import_declarations:
+            i._unit = self
+        for name, t in self.types.items():
+            _thread_type(t, name, self, None)
+
+    def slice(self, span: JSpan) -> str:
+        """``source`` between the span's UTF-8 byte offsets (J-15); a plain index when the file is ASCII."""
+        b0, b1 = span.bytes
+        if self._source_bytes is None:
+            return self.source[b0:b1]
+        return self._source_bytes[b0:b1].decode("utf-8")
+
+    # -- 1.x views ----------------------------------------------------------------------------
+
+    @property
+    def file_path(self) -> str:
+        if self._file_path is None:
+            raise RuntimeError(f"{self.id} has no file_path — it is the symbol-table key, stamped by JApplication")
+        return self._file_path
+
+    @property
+    def package_name(self) -> str:
+        return self.package
+
+    @property
+    def imports(self) -> List[str]:
+        return [i.path for i in self.import_declarations]
+
+    @property
+    def type_declarations(self) -> Dict[str, JType]:
+        return self.types
+
+    @property
+    def is_modified(self) -> bool:
+        """Always ``False``: the analyzer emits a snapshot, never an edit state."""
+        return False
+
+    @property
+    def code(self) -> str:
+        return self.source
+
+
+# ----------------------------------------------------------------------------------------------
+# Application-scope overlays: call graph, param edges, externals, artifact layer
+# ----------------------------------------------------------------------------------------------
+
+
+class JCallGraphEdge(_Base):
+    """A wire call-graph edge: ``can://`` endpoints, provenance tokens ``declared`` / ``rta``."""
+
+    src: str
+    dst: str
+    prov: List[str] = []
+    weight: int = 1
+
+
+class JParamEdge(_Base):
+    """An L4 ``param_in``/``param_out`` edge with global endpoints
+    (``<callable id>@L:C/actual_in:N`` → ``<callable id>@formal_in:N``).
+
+    ``var`` names the bound formal, and it arrived in codeanalyzer-java 3.1.2
+    (codeanalyzer-java#250). Before that the schema declared the property and the projection wrote
+    nothing, so a consumer predicate on it was ``null`` on every edge crossing a call boundary --
+    which under Cypher's three-valued logic drops the whole path and reads as a proved absence of
+    flow. ``Optional`` rather than required because a graph or an ``analysis.json`` from 3.1.1 or
+    earlier carries no such key, and both backends attach to artifacts they did not produce.
+    :class:`~cldk.models.typescript.models.TSParamEdge` has carried the same field since its own
+    analyzer added it."""
+
+    src: str
+    dst: str
+    var: Optional[str] = None
+
+
+class JExternalSymbol(_Base):
+    """A call target outside the project, keyed by its ``@external/…`` id on the application.
+    Declared in the analyzer's schema; not emitted for daytrader8 at any level."""
+
+    kind: str
+    signature: str
+    declaring_type: Optional[str] = None
+
+
+class JConfigKey(_Base):
+    id: str
+    key: str
+    namespace: str
+    value: Optional[str] = None
+    span: Optional[JSpan] = None
+    references: List[str] = []
+
+
+class JArtifact(_Base):
+    """A recognized non-code file (config, manifest, build descriptor)."""
+
+    id: str
+    kind: Literal["artifact"] = "artifact"
+    path: str
+    format: str
+    roles: List[str] = []
+    size_bytes: int
+    sha256: str
+    source: str = ""
+    text_truncated: bool = False
+    extraction: str = "none"
+    config_keys: List[JConfigKey] = []
+
+
+class JDependency(_Base):
+    group: Optional[str] = None
+    name: str
+    ecosystem: str = "maven"
+    spec: str = ""
+    kind: str = "runtime"
+    extras: List[str] = []
+    declared_in: str = ""
+    direct: bool = True
+    locked_version: Optional[str] = None
+    prov: List[str] = []
+
+
+class JEntrypointReport(_Base):
+    """Coverage and failure record for the entrypoint pass (codeanalyzer-java#235, 3.1.0).
+
+    The same four fields Python and TypeScript already carry (``PyEntrypointReport`` /
+    ``TSEntrypointReport``), so :class:`~cldk.analysis.commons.results.EntrypointCoverage` reads
+    one shape across the three languages."""
+
+    frameworks_detected: List[str] = []
+    rulesets: List[str] = []
+    unresolved: Dict[str, int] = {}
+    errors: List[str] = []
+
+
+class JConfigUse(_Base):
+    """One code-to-config edge: a config read whose key closed on a declared :class:`JConfigKey`.
+
+    ``src`` is the reading call's body-node id (``<callable id>@<line>:<col>``), ``dst`` the matched
+    key's id. ``prov`` names the **tier** that resolved it and is the reason this is not flattened:
+    ``["literal"]`` is a string literal at the call site (codeanalyzer-java#233); ``"dataflow"``
+    means the key was reached over the L3 DDG / L4 call graph (codeanalyzer-java#237) — weaker
+    evidence, and monotone with the analysis level. Python's ``PyConfigUseEdge`` verbatim."""
+
+    src: str
+    dst: str
+    prov: List[str] = []
+
+
+class JConfigRead(_Base):
+    """One config read whose key closed on no declared key — first class, so a read nobody can
+    trace stays as visible as one that resolves.
+
+    ``key`` is the literal text when it *was* a literal that matches no declared key
+    (``reason="undefined-key"``) and ``None`` when it never closed on one (``reason="non-literal"``);
+    ``prov`` lists every tier that was **attempted** before giving up, so ``["literal", "dataflow"]``
+    means the dataflow tier ran too and still could not name the key. Python's ``PyConfigRead``
+    verbatim."""
+
+    site: str
+    callee: str
+    key: Optional[str] = None
+    reason: str = "non-literal"
+    prov: List[str] = []
+
+
+class JViewDispatch(_Base):
+    """One resolved view dispatch (codeanalyzer-java 3.3.0, spec 2026-09-11 § 4): the body node that
+    hands the request to a view template and the :class:`JArtifact` it reaches.
+
+    ``src`` is the dispatching body node's id (``<callable id>@<line>:<col>``) — a
+    ``RequestDispatcher.forward`` / ``include`` or ``sendRedirect`` call, a ``ModelAndView``
+    construction or ``setViewName``, or a Spring controller's ``return``; ``dst`` is the artifact's
+    ``can://<app>/artifact/<path>`` id. ``via`` names the mechanism (``forward | include | redirect |
+    view-name | navigation``) and ``prov`` the tier that closed the target: ``["literal"]`` is a string
+    at the site, ``["dataflow"]`` a local or parameter traced over the L3/L4 substrate — both mean
+    exactly one target — and ``["table"]`` (3.3.1, § 4.5) a lookup into a static string table, which
+    is a **may-dispatch**: one edge per entry of the table, from the same site. Kept ``str`` rather
+    than ``Literal`` on purpose, as :class:`JConfigRead.reason` is: ``navigation`` is reserved and
+    unemitted today, and a closed type here would break on the analyzer release that fills it."""
+
+    src: str
+    dst: str
+    via: str
+    prov: List[str] = []
+
+
+class JViewDispatchUnresolved(_Base):
+    """A detected dispatch that closed on no artifact — first class, so a page nobody can trace stays
+    as visible as one that resolves. ``target`` is the decoded literal when there was one and
+    ``None`` for ``reason="non-literal"``; ``reason`` is ``non-literal`` / ``no-such-artifact`` (a
+    servlet URL, a ``*.faces`` route, a file outside the repository) / ``ambiguous`` (a view name
+    matching two templates); ``prov`` lists every tier attempted. ``callee`` is the dispatching
+    callee's ``@external`` id for a call site and the enclosing callable's id for a ``return`` site.
+    **JSON-only**: the projection has no node for a target that resolved to nothing."""
+
+    site: str
+    callee: str
+    target: Optional[str] = None
+    via: str
+    reason: str
+    prov: List[str] = []
+
+
+class JApplication(_Base):
+    """The application root. ``call_graph``/``param_in``/``param_out`` are absent below the level
+    that computes them — empty here, never ``None``.
+
+    That reading is exact for ``call_graph`` on both backends. ``param_in``/``param_out`` are
+    **always empty off the Neo4j projection**, at every level: ``--emit neo4j`` forces L4, so the
+    dataflow overlay was computed, but this leg does not project the port lattice back out (leg 3b
+    does). An empty pair there is this backend's silence, not the analyzer's.
+    """
+
+    id: str
+    kind: Literal["application"] = "application"
+    symbol_table: Dict[str, JCompilationUnit]
+    call_graph: List[JCallGraphEdge] = []
+    external_symbols: Optional[Dict[str, JExternalSymbol]] = None
+    param_in: List[JParamEdge] = []
+    param_out: List[JParamEdge] = []
+    artifacts: Dict[str, JArtifact] = {}
+    dependencies: List[JDependency] = []
+    #: The three 3.1.0 overlays, and the one place in this file where ``None`` and ``[]`` are
+    #: *different answers*: ``None`` is "this payload predates the pass" (codeanalyzer-java 3.0.x
+    #: emits none of these keys at all) and an empty list/report is "the pass ran and found
+    #: nothing". The accessors refuse on the first and answer on the second, measured here rather
+    #: than from an analyzer version string — the same ruling as the port probe.
+    config_uses: Optional[List[JConfigUse]] = None
+    config_reads_unresolved: Optional[List[JConfigRead]] = None
+    entrypoint_report: Optional[JEntrypointReport] = None
+    #: The 3.3.0 view-dispatch layer. ``None`` here means only "the key is absent": 3.3.x writes both
+    #: lists only when non-empty, so — unlike the 3.1.0 trio — no key on the wire is unconditional and
+    #: the backends decide "predates the pass" from the analyzer generation instead
+    #: (:data:`~cldk.analysis.java.backend.VIEW_DISPATCH_UNAVAILABLE`).
+    view_dispatches: Optional[List[JViewDispatch]] = None
+    view_dispatches_unresolved: Optional[List[JViewDispatchUnresolved]] = None
+
+    def model_post_init(self, __context: Any) -> None:
+        for path, unit in self.symbol_table.items():
+            unit._file_path = path
+
+
+class JAnalyzer(_Base):
+    name: str
+    version: str
+
+
+class JAnalysis(_Base):
+    """The envelope ``analysis.json`` IS."""
+
+    schema_version: str
+    language: str
+    max_level: int
+    k_limit: Optional[int] = None  # not emitted by 3.0.1 at any level
+    analyzer: JAnalyzer
+    application: JApplication
+
+
+# ----------------------------------------------------------------------------------------------
+# Call-graph node payload built by the backends (not on the wire)
+# ----------------------------------------------------------------------------------------------
+
+
+class JMethodDetail(_Base):
+    """The ``method_detail`` node attribute of ``get_call_graph()``: built from the string node key
+    (``klass`` = everything before the signature's simple name) and the resolved callable."""
+
+    method_declaration: Optional[str] = None
+    # class is a reserved keyword in python. we'll use klass.
+    klass: str
+    method: JCallable
+
+    def __repr__(self):
+        return f"JMethodDetail({self.method_declaration})"
+
+    def __hash__(self):
+        return hash((self.klass, self.method.id))
+
+
+# ----------------------------------------------------------------------------------------------
+# 1.x compatibility aliases
+# ----------------------------------------------------------------------------------------------
+
+JGraphEdges = JCallGraphEdge  # J-14: the v1 rich edge is gone; the wire edge is the type
+JVariableDeclaration = JLocalVariable
+InitializationBlock = JCallable  # ``JType.initialization_blocks`` are the ``initializer`` callables
+
+
+# Resolve forward references for the mutually-recursive models.
+JCallable.model_rebuild()
+JType.model_rebuild()
+JCompilationUnit.model_rebuild()
+JApplication.model_rebuild()

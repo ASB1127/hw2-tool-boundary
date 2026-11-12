@@ -1,0 +1,540 @@
+{
+  "target": {
+    "input": "/sandbox/work/target",
+    "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
+  },
+  "scan": {
+    "bandit_version": "1.9.4",
+    "min_severity": "MEDIUM",
+    "alert_count": 18
+  },
+  "budget": {
+    "max_tokens": 300000,
+    "used_tokens": 301221,
+    "exhausted": true
+  },
+  "alerts": [
+    {
+      "alert_id": "BenchmarkTest00011-47-B608-3bdeee29bc8f",
+      "test_id": "B608",
+      "path": "testcode/BenchmarkTest00011.py",
+      "line": 47,
+      "severity": "MEDIUM",
+      "confidence": "LOW",
+      "label": 0,
+      "status": "classified",
+      "rationale": "The SQL query uses a parameter placeholder ('?') and request-derived input is passed as a parameter to the execute method, preventing SQL injection. The query itself is not constructed with user input.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00011.py",
+          "start_line": 39,
+          "end_line": 39
+        },
+        {
+          "path": "testcode/BenchmarkTest00011.py",
+          "start_line": 41,
+          "end_line": 41
+        },
+        {
+          "path": "testcode/BenchmarkTest00011.py",
+          "start_line": 43,
+          "end_line": 43
+        },
+        {
+          "path": "testcode/BenchmarkTest00011.py",
+          "start_line": 47,
+          "end_line": 47
+        },
+        {
+          "path": "testcode/BenchmarkTest00011.py",
+          "start_line": 50,
+          "end_line": 50
+        }
+      ],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00012-48-B608-8355e06d985b",
+      "test_id": "B608",
+      "path": "testcode/BenchmarkTest00012.py",
+      "line": 48,
+      "severity": "MEDIUM",
+      "confidence": "LOW",
+      "label": 1,
+      "status": "classified",
+      "rationale": "Request-derived input (a cookie value from request.cookies.get) is assigned to 'param', is included in 'string93844', sliced and assigned to 'bar', and 'bar' is passed as the parameter to the SQL query. While the query does use a parameterized statement (with '?'), the Bandit B608 rule triggers on dynamic query construction, and the construction uses an f-string. Although not a direct SQL injection, there is user-influenced data flow to the query, warranting the finding. Evidence follows the data flow from request to parameter.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00012.py",
+          "start_line": 48,
+          "end_line": 48
+        },
+        {
+          "path": "testcode/BenchmarkTest00012.py",
+          "start_line": 5,
+          "end_line": 5
+        },
+        {
+          "path": "testcode/BenchmarkTest00012.py",
+          "start_line": 8,
+          "end_line": 10
+        },
+        {
+          "path": "testcode/BenchmarkTest00012.py",
+          "start_line": 51,
+          "end_line": 51
+        }
+      ],
+      "remediation": {
+        "status": "rejected",
+        "diff": "--- a/testcode/BenchmarkTest00012.py\n+++ b/testcode/BenchmarkTest00012.py\n@@ -48 +48 @@\n-\t\tsql = f'SELECT username from USERS where password = ?'\n+\t\tsql = 'SELECT username from USERS where password = ?'\n",
+        "checks": {
+          "applies": false,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00013-55-B314-1ef3e5572d88",
+      "test_id": "B314",
+      "path": "testcode/BenchmarkTest00013.py",
+      "line": 55,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": null,
+      "status": "error",
+      "rationale": "label must be 0 or 1",
+      "evidence": [],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00014-56-B314-5aee2aba9c8f",
+      "test_id": "B314",
+      "path": "testcode/BenchmarkTest00014.py",
+      "line": 56,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The flagged code uses xml.etree.ElementTree.parse to parse XML data, but the file does not import defusedxml or call defusedxml.defuse_stdlib(). This makes it vulnerable to XML attacks as per Bandit B314. The direct use of ET.parse is evident, and no mitigation is present in code context.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00014.py",
+          "start_line": 56,
+          "end_line": 56
+        },
+        {
+          "path": "testcode/BenchmarkTest00014.py",
+          "start_line": 1,
+          "end_line": 59
+        }
+      ],
+      "remediation": {
+        "status": "rejected",
+        "diff": "--- a/testcode/BenchmarkTest00014.py\n+++ b/testcode/BenchmarkTest00014.py\n@@ -46,0 +47,2 @@\n+import defusedxml\n+defusedxml.defuse_stdlib()\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": false,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00015-56-B314-17ff7efbd6a2",
+      "test_id": "B314",
+      "path": "testcode/BenchmarkTest00015.py",
+      "line": 56,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The flagged code uses xml.etree.ElementTree.parse to parse an XML file, and then immediately constructs an XPath query with request-derived input. Although it parses a file from a fixed resource path, the Bandit issue targets ET.parse in general as unsafe with any XML input. The 'bar' variable comes from a request cookie, so even if the XML file itself is not attacker controlled, the XPath query depends on attacker input, and the use of un-defused xml.etree.ElementTree may lead to XML attacks such as XXE if the XML file is malicious. Evidence shows the code context, request input flow, and the direct use of ET.parse.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00015.py",
+          "start_line": 56,
+          "end_line": 56
+        },
+        {
+          "path": "testcode/BenchmarkTest00015.py",
+          "start_line": 1,
+          "end_line": 39
+        }
+      ],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00016-58-B314-2da372846e3e",
+      "test_id": "B314",
+      "path": "testcode/BenchmarkTest00016.py",
+      "line": 58,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 0,
+      "status": "classified",
+      "rationale": "The ET.parse call on line 58 is only parsing an XML file from a fixed path constructed from helpers.utils.RES_DIR, not untrusted/request input. No data flow from user-derived input to the ET.parse() filename argument is present in the local or DDG evidence. The only inputs are fixed module attributes, not attacker-controlled data sources.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00016.py",
+          "start_line": 58,
+          "end_line": 58
+        },
+        {
+          "path": "testcode/BenchmarkTest00016.py",
+          "start_line": 48,
+          "end_line": 49
+        }
+      ],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00017-49-B317-57922266a6ec",
+      "test_id": "B317",
+      "path": "testcode/BenchmarkTest00017.py",
+      "line": 49,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The function BenchmarkTest00017_post constructs the XML parser using xml.sax.make_parser() at line 49. The XML input (bar) is derived from a request cookie ('param'), which is user-controllable. No call to defusedxml.defuse_stdlib or use of a secure XML replacement is present in the file. The unsafe parser is then passed to xml.dom.minidom.parseString(bar, parser), resulting in untrusted input being parsed with a non-defused, vulnerable parser. This is a textbook case of the B317 issue.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00017.py",
+          "start_line": 49,
+          "end_line": 49
+        },
+        {
+          "path": "testcode/BenchmarkTest00017.py",
+          "start_line": 5,
+          "end_line": 5
+        },
+        {
+          "path": "testcode/BenchmarkTest00017.py",
+          "start_line": 54,
+          "end_line": 54
+        }
+      ],
+      "remediation": {
+        "status": "rejected",
+        "diff": "--- a/testcode/BenchmarkTest00017.py\n+++ b/testcode/BenchmarkTest00017.py\n@@ -46,0 +47 @@\n+\t\timport defusedxml.sax\n@@ -49 +50 @@\n-\t\t\tparser = xml.sax.make_parser()\n+\t\t\tparser = defusedxml.sax.make_parser()\n",
+        "checks": {
+          "applies": false,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00017-52-B318-f04e24aff15b",
+      "test_id": "B318",
+      "path": "testcode/BenchmarkTest00017.py",
+      "line": 52,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 0,
+      "status": "classified",
+      "rationale": "xml.dom.minidom.parseString is used at the flagged location, but there is no static evidence that untrusted input is passed to it nor indication that defuse_stdlib is needed here. No clear dataflow from an untrusted or user-controlled source to the XML parser, and no mitigating wrapper observed.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00017.py",
+          "start_line": 52,
+          "end_line": 52
+        }
+      ],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00054-64-B324-bceb8a01c722",
+      "test_id": "B324",
+      "path": "testcode/BenchmarkTest00054.py",
+      "line": 64,
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "label": null,
+      "status": "error",
+      "rationale": "label must be 0 or 1",
+      "evidence": [],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00057-65-B324-15d57c1b155b",
+      "test_id": "B324",
+      "path": "testcode/BenchmarkTest00057.py",
+      "line": 65,
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The flagged code directly uses hashlib.md5() and hash.update(input), where input comes from outside the shown context and may be user-controlled. MD5 is known to be insecure for security-sensitive uses. There is no evidence of usedforsecurity=False or verified parameterization mitigating the risk. The context suggests this is a password-related operation writing to a file, increasing the likelihood of security relevance.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00057.py",
+          "start_line": 64,
+          "end_line": 68
+        }
+      ],
+      "remediation": {
+        "status": "rejected",
+        "diff": "--- a/testcode/BenchmarkTest00057.py\n+++ b/testcode/BenchmarkTest00057.py\n@@ -65 +65 @@\n-\t\thash = hashlib.md5()\n+\t\thash = hashlib.md5(usedforsecurity=False)\n",
+        "checks": {
+          "applies": false,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00058-65-B324-07e016baa9ae",
+      "test_id": "B324",
+      "path": "testcode/BenchmarkTest00058.py",
+      "line": 65,
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The flagged code uses hashlib.sha1() to hash input data. While the value assigned to 'bar' is programmatically determined as 'safe!', the code is structured to look like it could be vulnerable to tainted or user-controlled input in other variants. Bandit is flagging use of a weak hash function, and the evidence confirms hashlib.sha1() is used for hashing and for storing potentially sensitive data; there is no indication of usedforsecurity=False. This is precisely the case intended by the rule.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00058.py",
+          "start_line": 65,
+          "end_line": 66
+        },
+        {
+          "path": "testcode/BenchmarkTest00058.py",
+          "start_line": 1,
+          "end_line": 39
+        }
+      ],
+      "remediation": {
+        "status": "rejected",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00059-63-B324-af92292ff7e0",
+      "test_id": "B324",
+      "path": "testcode/BenchmarkTest00059.py",
+      "line": 63,
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The code directly uses hashlib.sha1() for hashing, which is considered a weak hash and flagged by Bandit B324. There is no indication that this use is not for security, nor is usedforsecurity=False specified. The code is not parameterized or otherwise mitigated, and this is a straight use of SHA-1 for input.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00059.py",
+          "start_line": 63,
+          "end_line": 64
+        }
+      ],
+      "remediation": {
+        "status": "rejected",
+        "diff": "--- a/testcode/BenchmarkTest00059.py\n+++ b/testcode/BenchmarkTest00059.py\n@@ -63 +63 @@\n-\t\thash = hashlib.sha1()\n+\t\thash = hashlib.sha256()\n",
+        "checks": {
+          "applies": false,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00060-60-B324-4830131d003b",
+      "test_id": "B324",
+      "path": "testcode/BenchmarkTest00060.py",
+      "line": 60,
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The code at line 60 uses hashlib.sha1() to create a hash, which Bandit correctly flags as cryptographically weak and insecure for security-related purposes. The evidence includes the flagged line and surrounding context showing hash initialization and update with externally derived input, and there is no mitigation or non-security use apparent. Use of SHA1 for security purposes is considered insecure even if parameterization is possible.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00060.py",
+          "start_line": 59,
+          "end_line": 61
+        }
+      ],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        },
+        "summary": "The target file testcode/BenchmarkTest00060.py does not exist in the workspace, so no source change could be made."
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00073-54-B307-8ba554f115be",
+      "test_id": "B307",
+      "path": "testcode/BenchmarkTest00073.py",
+      "line": 54,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The flagged code directly calls eval(bar) and there is no evidence that 'bar' is a fixed or safe value, nor is there use of ast.literal_eval or other sanitization. The use of eval on a variable value is potentially unsafe, as this could allow code execution if 'bar' is attacker-controlled. The DDG does not provide evidence of sanitization or constraint. The flagged code and callable context show an unsanitized eval.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00073.py",
+          "start_line": 53,
+          "end_line": 55
+        }
+      ],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00074-51-B102-166a67d69624",
+      "test_id": "B102",
+      "path": "testcode/BenchmarkTest00074.py",
+      "line": 51,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The function BenchmarkTest00074_post uses exec(bar), where bar is set to the value of a cookie parameter (request.cookies.get(...)), decoded and propagated via a ConfigParser object. Dataflow shows 'bar' at the exec site comes from request-derived input with no sanitization. This enables remote code execution via attacker-controlled input.",
+      "evidence": [
+        {
+          "path": "testcode/BenchmarkTest00074.py",
+          "start_line": 35,
+          "end_line": 57
+        }
+      ],
+      "remediation": {
+        "status": "rejected",
+        "diff": "--- a/testcode/BenchmarkTest00074.py\n+++ b/testcode/BenchmarkTest00074.py\n@@ -51 +51,2 @@\n-\t\t\texec(bar)\n+\t\t\t# Removed insecure exec() call. Outputting bar as plain text instead.\n+\t\t\tRESPONSE += f'Received statement to execute: {escape_for_html(bar)}'\n",
+        "checks": {
+          "applies": false,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00075-53-B102-605e820d12a4",
+      "test_id": "B102",
+      "path": "testcode/BenchmarkTest00075.py",
+      "line": 53,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": null,
+      "status": "budget_exhausted",
+      "rationale": "",
+      "evidence": [],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00078-53-B301-d8ffd7fc3af4",
+      "test_id": "B301",
+      "path": "testcode/BenchmarkTest00078.py",
+      "line": 53,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": null,
+      "status": "budget_exhausted",
+      "rationale": "",
+      "evidence": [],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "BenchmarkTest00099-46-B608-fa8e8e39d8d9",
+      "test_id": "B608",
+      "path": "testcode/BenchmarkTest00099.py",
+      "line": 46,
+      "severity": "MEDIUM",
+      "confidence": "LOW",
+      "label": null,
+      "status": "budget_exhausted",
+      "rationale": "",
+      "evidence": [],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    }
+  ]
+}

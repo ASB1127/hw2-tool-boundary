@@ -65,3 +65,11 @@ as the policy, `--no-auto-providers` in place of `--provider anthropic`, and the
 server's address in `exec --env`. Your own `README.md` must tell us how to run
 both agents end to end, with `configs/mcp.toml` and `configs/codeact.toml` (brief,
 Section 9).
+
+## Remediation outcomes
+
+A validated label-1 alert enters remediation. If the model returns `edited`, the
+runner computes the diff and runs all three acceptance checks; the report records
+`accepted` or `rejected`. If it returns `not_edited`, no patch exists to check, so
+the report records `skipped` with an empty diff, null checks, and the model's
+`summary` as an extra field. Label-0 and unclassified alerts are also `skipped`.

@@ -6,3 +6,6 @@ __pycache__/
 *.synctex.gz
 _minted*/
 .pytest_cache/
+html/
+personal_tests/
+targets/

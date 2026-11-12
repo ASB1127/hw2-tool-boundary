@@ -1,0 +1,200 @@
+name: Python uv Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  discussions: write  # attach the release-linked repo Discussion (Announcements)
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      # Load-bearing for **Maven**, not for the analyzer. The analyzer jar and the JVM it runs
+      # on come from the `codeanalyzer-java` wheel (#339), but codeanalyzer-java's own auto-build
+      # shells out to `mvn`, which needs a JDK on PATH; without one the Java e2e degrades to a
+      # declared-only call graph and CI goes green on a partial answer. Do not delete this step.
+      - name: Set up GraalVM CE Java 11
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '21'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          native-image-job-reports: 'true'
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install Python package dependencies
+        run: uv sync --all-groups --frozen
+
+      # codeanalyzer-python provisions a virtualenv for the project it analyses and
+      # discovers a base interpreter for it (SYSTEM_PYTHON, else PATH/pyenv/conda/asdf).
+      # A uv-managed interpreter is on none of those on a runner, so every test that
+      # runs the real analyzer errored at setup (release run 34023739548). Point it
+      # at the interpreter uv just installed -- the override the analyzer documents.
+      - name: Point codeanalyzer-python at the analysis interpreter
+        run: echo "SYSTEM_PYTHON=$(uv python find 3.11)" >> "$GITHUB_ENV"
+
+      - name: Run Tests
+        id: test
+        # continue-on-error is deliberate: without it a red suite fails the job
+        # immediately and the tag-deletion step below never runs. It must be paired
+        # with `outcome` (not `conclusion`) in that step — see the comment there.
+        continue-on-error: true
+        run: uv run make test
+
+      - name: Delete tag on failure
+        # MUST be `outcome`, not `conclusion`: continue-on-error rewrites `conclusion`
+        # to `success`, so `steps.test.conclusion == 'failure'` is never true and this
+        # step never fires. `outcome` preserves the step's real result.
+        if: steps.test.outcome == 'failure'
+        run: |
+          echo "Tests failed. Deleting tag ${GITHUB_REF#refs/tags/}..."
+          git push --delete origin ${GITHUB_REF#refs/tags/}
+          exit 1
+
+      - name: Build Package
+        run: uv build
+
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        # Source the release body from the hand-written CHANGELOG.md section for this tag —
+        # deterministic and independent of PR labels — and refuse to publish/announce a blank
+        # body. The previous label-based changelog scraper emitted nothing for unlabeled PRs,
+        # which blanked the release and crashed the org announcement. See issue #289.
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF#refs/tags/}"   # e.g. v1.4.4 — matches the "## [v1.4.4]" heading
+          notes=$(awk -v h="## [$version]" '
+            !seen && index($0, h) == 1 { seen = 1; next }
+            seen && index($0, "## [") == 1 { exit }
+            seen { print }
+          ' CHANGELOG.md | sed '/./,$!d' | tac | sed '/./,$!d' | tac)   # strip blank edges
+          if [ -z "$notes" ]; then
+            echo "::error::No CHANGELOG.md entry for $version — refusing to publish a blank release."
+            exit 1
+          fi
+          {
+            echo "notes<<__CHANGELOG_EOF__"
+            echo "$notes"
+            echo "__CHANGELOG_EOF__"
+          } >> "$GITHUB_OUTPUT"
+          echo "Release notes for $version:"; echo "$notes"
+
+      # The release body is install one-liners plus a download table; the categorized
+      # "What's Changed" (merged PRs grouped under emoji headings via .github/release.yml)
+      # is appended by generate_release_notes below. The hand-written CHANGELOG section
+      # stays the ANNOUNCEMENT's seed rather than the release body: a changelog entry
+      # explains a change to a maintainer, a release body tells a user what to install.
+      # Indented code blocks avoid backticks inside the heredoc.
+      - name: Compose release notes header (install + download)
+        run: |
+          set -euo pipefail
+          REPO="codellm-devkit/python-sdk"
+          TAG="${GITHUB_REF#refs/tags/}"          # e.g. v2.0.0-rc.2
+          VERSION="${TAG#v}"                      # 2.0.0-rc.2
+          # PyPI normalizes 2.0.0-rc.2 to 2.0.0rc2, and the built artifacts carry the
+          # normalized spelling, so the install line and the asset links must use it.
+          # Done with sed rather than packaging.version: this runs on the runner's bare
+          # python3, which is not the uv-managed environment the tests use.
+          PV=$(printf '%s' "$VERSION" \
+                | sed -E 's/-?alpha\.?([0-9]+)/a\1/; s/-?beta\.?([0-9]+)/b\1/; s/-(rc|a|b)\.?([0-9]+)/\1\2/')
+          BASE="https://github.com/${REPO}/releases/download/${TAG}"
+          PRE=""
+          case "$PV" in *rc*|*a*|*b*) PRE="--pre " ;; esac
+          cat > "$RUNNER_TEMP/RELEASE_BODY.md" <<EOF
+          ## Install cldk ${TAG}
+
+          PyPI:
+
+              pip install ${PRE}cldk==${PV}
+
+          With the read-only Neo4j backend:
+
+              pip install ${PRE}'cldk[neo4j]==${PV}'
+
+          ## Download
+
+          | File | Description |
+          | --- | --- |
+          | [cldk-${PV}-py3-none-any.whl](${BASE}/cldk-${PV}-py3-none-any.whl) | Python wheel |
+          | [cldk-${PV}.tar.gz](${BASE}/cldk-${PV}.tar.gz) | Source distribution |
+          EOF
+          echo "----- composed header -----"; cat "$RUNNER_TEMP/RELEASE_BODY.md"
+
+      - name: Publish Release on GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body_path: ${{ runner.temp }}/RELEASE_BODY.md
+          generate_release_notes: true   # categorized "What's Changed"; see .github/release.yml
+          # An rc tag is a candidate, not the repository's latest release.
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
+          # Auto-open a repo-level Discussion linked to this release, seeded with this
+          # body. Requires Discussions enabled and this category to exist. The prose
+          # announcement is curated afterwards (see CLAUDE.md).
+          discussion_category_name: Announcements
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Mirror the release announcement into the ORG-level discussions, which are
+      # backed by codellm-devkit/.github. GITHUB_TOKEN can't write cross-repo, so
+      # this uses a PAT (ORG_DISCUSSIONS_TOKEN) with repo scope, and posts via the
+      # createDiscussion GraphQL mutation. The body (the CHANGELOG.md notes) is
+      # passed via env to avoid shell-injection, matching the repo-level post.
+      - name: Announce in org-level discussions (codellm-devkit/.github)
+        continue-on-error: true   # a failed org post must not fail an otherwise-good release
+        env:
+          GH_TOKEN: ${{ secrets.ORG_DISCUSSIONS_TOKEN }}
+          BODY: ${{ steps.notes.outputs.notes }}
+        run: |
+          set -uo pipefail
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          OWNER="codellm-devkit"; REPO=".github"; CATEGORY="Announcements"
+          # The mutation needs GraphQL node IDs, not names — resolve them first.
+          RESP=$(gh api graphql \
+            -f query='query($o:String!,$r:String!){repository(owner:$o,name:$r){id discussionCategories(first:25){nodes{id name}}}}' \
+            -f o="$OWNER" -f r="$REPO") \
+            || { echo "::warning::org discussion lookup failed — skipping org announcement."; exit 0; }
+          REPO_ID=$(echo "$RESP" | jq -r '.data.repository.id')
+          CAT_ID=$(echo "$RESP" | jq -r --arg c "$CATEGORY" '.data.repository.discussionCategories.nodes[]|select(.name==$c)|.id')
+          if [[ -z "$REPO_ID" || "$REPO_ID" == "null" || -z "$CAT_ID" ]]; then
+            echo "::warning::could not resolve $OWNER/$REPO discussion category '$CATEGORY' — skipping org announcement."
+            exit 0
+          fi
+          gh api graphql \
+            -f query='mutation($rid:ID!,$cid:ID!,$t:String!,$b:String!){createDiscussion(input:{repositoryId:$rid,categoryId:$cid,title:$t,body:$b}){discussion{url}}}' \
+            -f rid="$REPO_ID" -f cid="$CAT_ID" \
+            -f t="python-sdk v$VERSION" \
+            -f b="$BODY"
+
+      - name: Publish package distributions to PyPI
+        run: uv publish --token ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Trigger docs API-reference update
+        # After a successful release, tell the docs repo to regenerate and PR the
+        # Python API reference against this tag. Requires a DOCS_DISPATCH_TOKEN
+        # secret: a PAT (or fine-grained token) with contents:write on
+        # codellm-devkit/docs. See docs-astro .github/workflows/update-api-docs.yml.
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.DOCS_DISPATCH_TOKEN }}
+          repository: codellm-devkit/docs
+          event-type: sdk-release
+          client-payload: '{"ref": "${{ github.ref_name }}"}'

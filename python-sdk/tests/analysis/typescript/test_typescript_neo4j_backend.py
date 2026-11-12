@@ -1,0 +1,469 @@
+################################################################################
+# Copyright IBM Corporation 2026
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+"""Integration tests for the read-only Neo4j-backed TypeScript analysis backend.
+
+**This module WRITES to the Neo4j server it is pointed at.** Its harness loads the sample app's
+graph out of band (``codeanalyzer-typescript --emit neo4j`` over Bolt — the same way a cloud
+deployment would) before the read-only assertions run, and tears that application's subgraph down
+afterwards. It is therefore gated on its own ``CLDK_TEST_NEO4J_WRITE_*`` variables, never on the
+ordinary ``CLDK_TEST_NEO4J_*`` ones that point read-only suites at a graph someone else deployed,
+and it has **no defaults** (the leg-1.6 writer lesson, #324: a default of ``bolt://localhost:7687``
+is an ssh tunnel on at least one development machine):
+
+    CLDK_TEST_NEO4J_WRITE_URI=bolt://localhost:7691 \
+    CLDK_TEST_NEO4J_WRITE_USER=neo4j \
+    CLDK_TEST_NEO4J_WRITE_PASSWORD=test \
+    pytest tests/analysis/typescript/test_typescript_neo4j_backend.py
+
+(e.g. `docker run -p 7691:7687 -e NEO4J_AUTH=neo4j/test neo4j:5`). The binary is resolved the
+usual way: ``$CODEANALYZER_TS_BIN``, then the ``codeanalyzer-typescript`` wheel. Read-only live
+coverage of the backend lives in ``test_typescript_e2e_neo4j_live.py``.
+
+**The tolerances, each with its cause.** The graph is the analyzer's own projection and the
+projection is lossy (the full ledger is the "on ``TSNeo4jBackend``" table in
+``docs/agent-api-reference.md``). Two assertions below are therefore weaker than the parity they
+were originally written to prove, and a third stopped being weak in #368; each says so where it
+stands, so a reader does not mistake one for the other:
+
+* ``get_method_parameters`` answers again, and this suite is where the *answering* direction of
+  #368 is pinned: the graph this file emits is the one the pinned analyzer writes, so it carries
+  ``:TSCallable.parameters_json`` and the two tests below compare real parameter names against
+  the sources. The refusing direction — a graph emitted before 1.4.0, which carries no binding
+  layer and must not answer an ambiguous ``[]`` — is pinned over the fake driver in
+  ``test_typescript_get_method_functions.py``, whose ``FakeDriver`` writes none of it.
+* A call-graph edge carries ``type`` / ``weight`` / ``provenance`` and nothing else, on both
+  TypeScript backends. There is no ``tags`` key to assert: ``tags`` was a schema-1.0.0 call-edge
+  field, and schema v2's ``TSCallGraphEdge`` is ``{src, dst, prov, weight}``. So the edge shape is
+  asserted exactly rather than by membership, which is what let the stale key go unnoticed.
+* A call site keeps its lines and its resolved ``callee_signature``; ``method_name`` is ``""`` and
+  every receiver/argument facet is ``None``/empty, because the ``:TSBodyNode`` a site is rebuilt
+  from carries neither (``cldk.analysis.typescript.neo4j.reconstruct.callsite``). The loss is
+  asserted rather than skipped — a receiver that started arriving would be news.
+"""
+
+import logging
+import os
+import shlex
+import subprocess
+import tempfile
+from pathlib import Path
+
+import networkx as nx
+import pytest
+
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+from cldk.analysis.typescript.neo4j import Neo4jConnectionConfig
+
+logging.getLogger("neo4j").setLevel(logging.ERROR)
+
+NEO4J_URI = os.environ.get("CLDK_TEST_NEO4J_WRITE_URI")
+NEO4J_USER = os.environ.get("CLDK_TEST_NEO4J_WRITE_USER")
+NEO4J_PASSWORD = os.environ.get("CLDK_TEST_NEO4J_WRITE_PASSWORD")
+APP_NAME = "application"
+#: Every node the emitter writes for APP_NAME lives under this one prefix; the teardown deletes
+#: exactly that, plus the application anchor, and nothing else on the server. It was two prefixes
+#: (one per language namespace) while the language was the outermost segment; the application
+#: prefix now covers both, and also the ``@external`` ghosts and artifacts the pair never reached.
+APP_PREFIXES = (f"can://{APP_NAME}/",)
+APP_ID = f"can://{APP_NAME}"
+
+
+def _neo4j_reachable() -> bool:
+    if not (NEO4J_URI and NEO4J_USER and NEO4J_PASSWORD):
+        return False
+    try:
+        from neo4j import GraphDatabase
+    except ModuleNotFoundError:
+        return False
+    try:
+        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+        driver.verify_connectivity()
+        driver.close()
+        return True
+    except Exception:  # noqa: BLE001 - any connection failure ⇒ skip
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _neo4j_reachable(),
+    reason=(
+        "this module WRITES the graph (it runs codeanalyzer-typescript --emit neo4j and deletes the "
+        "application afterwards); set CLDK_TEST_NEO4J_WRITE_URI / _WRITE_USER / _WRITE_PASSWORD to a "
+        "disposable server to run it -- there are no defaults"
+    ),
+)
+
+
+def _teardown_application() -> None:
+    """Delete the application's own subgraph: every node under its two id prefixes and the
+    ``:Application`` anchor. The unprefixed nodes the emitter also MERGEs (``Artifact``, ``Package``,
+    ``ConfigKey``, ``TSDecorator``) are shared with any other application on the server and are
+    left in place."""
+    from neo4j import GraphDatabase
+
+    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+    try:
+        with driver.session() as session:
+            session.run(
+                "MATCH (n) WHERE n.id STARTS WITH $p OR n.id = $app_id DETACH DELETE n",
+                p=APP_PREFIXES[0],
+                app_id=APP_ID,
+            )
+    finally:
+        driver.close()
+
+
+def _codeanalyzer_ts_exec() -> list[str]:
+    """Resolve the codeanalyzer-typescript executable: ``$CODEANALYZER_TS_BIN``, else the wheel."""
+    env_bin = os.environ.get("CODEANALYZER_TS_BIN")
+    if env_bin:
+        return shlex.split(env_bin)
+    import codeanalyzer_typescript
+
+    return [str(codeanalyzer_typescript.bin_path())]
+
+
+def _populate_neo4j(project_dir) -> None:
+    """Load the sample app's graph into Neo4j out of band (what a cloud job would do).
+
+    The SDK's Neo4j backend is read-only, so the test harness — not CLDK — runs the analyzer's
+    ``--emit neo4j`` to produce the graph before the read-only assertions run.
+
+    **Two departures from the 2.5a spelling, both forced by codeanalyzer-typescript 1.3.0.**
+
+    *No ``-a``.* 1.3.0 refuses a level alongside ``--emit neo4j`` ("--analysis-level does not apply
+    to --emit neo4j; the graph is always projected at full depth") where 1.2.0 accepted and ignored
+    it, so the ``-a 2`` this used to pass now makes the emitter exit 1 and every test in this module
+    error out. The graph was always full depth, so dropping the flag changes what runs, not what is
+    loaded.
+
+    *The projection is applied here, not pushed by the analyzer.* 1.3.0's **live Bolt push silently
+    drops every type node and its containment edges** — measured on this very app: pushing over
+    ``--neo4j-uri`` leaves 0 ``:TSClass`` / ``:TSInterface`` / ``:TSEnum`` / ``:TSTypeAlias`` /
+    ``:TSNamespace`` nodes and no ``TS_HAS_METHOD`` / ``TS_HAS_FIELD`` / ``TS_EXTENDS`` /
+    ``TS_IMPLEMENTS`` relationships, so ``TSNeo4jBackend`` refuses the result at attach
+    (``GraphSchemaMismatch``: ``TS_HAS_METHOD`` missing). The *same run's* ``graph.cypher`` carries
+    all of them and applies without a single failed statement (6 classes, 2 interfaces, 2 enums, 1
+    type alias, 1 namespace). So the emitter is asked for its own projection and this applies it
+    verbatim: nothing is hand-written, and the graph under test is exactly what the analyzer
+    produced. Revert to ``--neo4j-uri`` when the push path is fixed upstream.
+    """
+    with tempfile.TemporaryDirectory() as out:
+        args = _codeanalyzer_ts_exec() + [
+            "-i",
+            str(Path(project_dir)),
+            "--emit",
+            "neo4j",
+            "-o",
+            out,
+            "--app-name",
+            APP_NAME,
+            "--eager",  # clean rebuild of this app's subgraph
+        ]
+        subprocess.run(args, capture_output=True, text=True, check=True)
+        _apply_cypher(Path(out) / "graph.cypher")
+
+
+def _apply_cypher(path: Path) -> None:
+    """Apply the analyzer's own ``graph.cypher`` statement by statement, after clearing this
+    application's subgraph so the load is a rebuild and not an accumulation.
+
+    A statement that fails is raised, never counted and skipped: a partially loaded graph is
+    exactly the failure mode this function exists to avoid.
+    """
+    from neo4j import GraphDatabase
+
+    _teardown_application()
+    statements = _cypher_statements(path.read_text(encoding="utf-8"))
+    assert statements, f"the analyzer emitted no Cypher at {path}"
+    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+    try:
+        with driver.session() as session:
+            for statement in statements:
+                session.run(statement)
+    finally:
+        driver.close()
+
+
+def _cypher_statements(text: str) -> list[str]:
+    """Split a Cypher script into statements, **respecting quoted strings and comments**.
+
+    Neither of the two obvious splits works on what the emitter writes, and both fail *silently*:
+
+    * splitting on ``";\n"`` cuts inside a string literal, because a callable's ``code`` property
+      is embedded with real newlines and TypeScript source routinely contains ``;`` at end of line
+      (``console.log(slug);``). The halves still run — the first is valid Cypher with a truncated
+      literal — so the load reports no failure and the graph carries **truncated source text**,
+      which is how this was found: ``get_source`` parity failed on exactly the callables whose body
+      ends in ``;``.
+    * discarding any chunk that *starts* with ``//`` drops the whole first statement of each
+      section, including the ``:Application`` anchor, and again nothing raises.
+
+    So this scans character by character: a ``'``/``"``/`````-quoted run (with backslash escapes)
+    is opaque, a ``//`` run to end of line is a comment, and a ``;`` anywhere else ends a statement.
+    """
+    statements: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote is not None:
+            current.append(ch)
+            if ch == "\\" and i + 1 < len(text):
+                current.append(text[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in "'\"`":
+            quote = ch
+            current.append(ch)
+        elif ch == "/" and text.startswith("//", i):
+            end = text.find("\n", i)
+            i = len(text) if end == -1 else end
+            continue
+        elif ch == ";":
+            statement = "".join(current).strip()
+            if statement:
+                statements.append(statement)
+            current = []
+        else:
+            current.append(ch)
+        i += 1
+    tail = "".join(current).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+@pytest.fixture(scope="module")
+def ts_neo4j(typescript_application):
+    """A read-only TypeScript facade over a Neo4j graph loaded out of band for the sample app."""
+    _populate_neo4j(typescript_application)
+    config = Neo4jConnectionConfig(
+        uri=NEO4J_URI,
+        username=NEO4J_USER,
+        password=NEO4J_PASSWORD,
+        application_name=APP_NAME,
+    )
+    analysis = CLDK(language="typescript").analysis(
+        project_path=typescript_application,
+        analysis_level=AnalysisLevel.call_graph,
+        neo4j_config=config,
+    )
+    yield analysis
+    analysis.backend.close()
+    _teardown_application()
+
+
+def test_backend_is_neo4j(ts_neo4j):
+    from cldk.analysis.typescript.neo4j import TSNeo4jBackend
+
+    assert isinstance(ts_neo4j.backend, TSNeo4jBackend)
+
+
+def test_symbol_table(ts_neo4j):
+    symtab = ts_neo4j.get_symbol_table()
+    assert len(symtab) == 5
+    assert "src/models.ts" in symtab
+    assert "src/controllers.ts" in symtab
+
+
+def test_classes_interfaces_enums_type_aliases(ts_neo4j):
+    classes = ts_neo4j.get_classes()
+    assert "src/models.User" in classes
+    assert "src/services.UserService" in classes
+    assert set(ts_neo4j.get_interfaces()) >= {"src/models.Identifiable", "src/models.Named"}
+    assert "src/models.Role" in ts_neo4j.get_enums()
+    assert "src/models.UserId" in ts_neo4j.get_type_aliases()
+
+
+def test_class_inheritance_split(ts_neo4j):
+    user = ts_neo4j.get_class("src/models.User")
+    assert "src/models.Entity" in user.base_classes
+    assert ts_neo4j.get_implemented_interfaces("src/models.User") == ["src/models.Named"]
+    assert "src/models.Entity" in ts_neo4j.get_extended_classes("src/models.User")
+    assert user.is_abstract is False
+
+
+def test_methods_and_constructor(ts_neo4j):
+    methods = ts_neo4j.get_methods_in_class("src/models.User")
+    assert "describe" in methods
+    assert "recordLogin" in methods
+    assert methods["recordLogin"].is_async is True
+    constructors = ts_neo4j.get_constructors("src/models.User")
+    assert any(c.kind == "constructor" for c in constructors.values())
+
+
+def test_fields_and_parameters(ts_neo4j):
+    fields = {f.name for f in ts_neo4j.get_fields("src/models.User")}
+    assert {"name", "role"} <= fields
+    # Both are projected since codeanalyzer-typescript 1.4.0 (#368): parameters ride
+    # :TSCallable.parameters_json, so this is parity with the sources again, not a refusal.
+    # services.ts declares `create(name: string, role: Role = Role.Member)`.
+    assert ts_neo4j.get_method_parameters("src/services.UserService", "create") == ["name", "role"]
+
+
+def test_import_bindings_are_the_modules_own(ts_neo4j):
+    """The TS_IMPORTS half of #368, against a graph this suite emitted with the pinned analyzer."""
+    imports = ts_neo4j.get_imports()
+    assert set(imports) == set(ts_neo4j.get_symbol_table()), "every module key answers, importing or not"
+    assert {(i.module, i.name) for i in imports["src/services.ts"]} == {("./models", n) for n in ("Named", "Role", "User", "UserId")}
+    assert {i.name for i in imports["src/services.ts"] if i.is_type_only} == {"Named", "UserId"}, "`import type` survives the aggregate"
+    assert imports["src/models.ts"] == [], "a module that imports nothing is present and empty, never absent"
+    # The sample app writes no `export … from` / `export { … }` statement at all — every symbol is
+    # exported at its own declaration — so exports_json is null on every module. That is the
+    # answer, not a gap: get_exports refuses only when the whole binding layer is missing.
+    assert ts_neo4j.get_exports() == {key: [] for key in imports}
+
+
+def test_get_method_resolves_module_level_function(ts_neo4j):
+    # regression for #247: get_method used to be class-scope only, so "src/index.main" (a
+    # module-level function that participates in a call edge, see test_callers_and_callees) was
+    # unreachable through it.
+    method = ts_neo4j.get_method("src/index", "main")
+    assert method is not None
+    assert method.signature == "src/index.main"
+
+
+def test_get_method_parameters_module_level_function(ts_neo4j):
+    # Exercises the module-level fallback in get_method_parameters/get_method. index.ts declares
+    # `function main(): void`, so the honest answer is [] — the same [] an unresolvable name gets,
+    # which is why the resolution half is asserted through get_method rather than through the
+    # parameter list. That [] is a *fact* here only because the graph carries the binding layer;
+    # without it the accessor refuses instead (test_typescript_get_method_functions.py).
+    assert ts_neo4j.get_method("src/index", "main") is not None
+    assert ts_neo4j.get_method_parameters("src/index", "main") == []
+    assert ts_neo4j.get_method_parameters("src/index", "no_such_function_here") == []
+
+
+def test_structured_decorators(ts_neo4j):
+    decorated = ts_neo4j.get_methods_with_decorators(["Controller", "Get"])
+    assert any(sig.endswith("UserController.show") for sig in decorated["Get"])
+    controller = ts_neo4j.get_class("src/controllers.UserController")
+    assert [d.name for d in controller.decorators] == ["Controller"]
+    assert controller.decorators[0].positional_arguments == ['"/users"']
+
+
+def test_class_decorators_query(ts_neo4j):
+    classes = ts_neo4j.get_classes_with_decorators(["Controller"])
+    assert any(sig.endswith("UserController") for sig in classes["Controller"])
+
+
+def test_call_graph_no_dangling_nodes(ts_neo4j):
+    graph = ts_neo4j.get_call_graph()
+    assert isinstance(graph, nx.DiGraph)
+    assert graph.number_of_edges() > 0
+    nodes = set(graph.nodes)
+    for src, dst in graph.edges:
+        assert src in nodes
+        assert dst in nodes
+    # Edge metadata is surfaced just like the in-memory backend: type / weight / provenance and
+    # nothing else. Asserted as an exact key set on every edge, not by membership — the stale
+    # `tags` this used to look for was a schema-1.0.0 field that schema v2 dropped, and a
+    # membership check is what let it sit here unnoticed.
+    for _, _, data in graph.edges(data=True):
+        assert set(data) == {"type", "weight", "provenance"}
+        assert data["type"] == "CALL_DEP"
+        assert data["weight"] >= 1
+        assert set(data["provenance"]) <= {"tsc", "defuse", "import"}
+
+
+def test_callers_and_callees(ts_neo4j):
+    # bare-signature form (module-level function)
+    callees = ts_neo4j.get_callees("src/index.main")
+    callee_sigs = {c["callee_signature"] for c in callees["callee_details"]}
+    assert "src/services.UserService.constructor" in callee_sigs
+
+    # (class, method) form, with edge metadata surfaced
+    callers = ts_neo4j.get_callers("src/services.UserService", "create")
+    assert callers["target_method"] == "src/services.UserService.create"
+    caller_sigs = {c["caller_signature"] for c in callers["caller_details"]}
+    assert "src/index.main" in caller_sigs
+    main_edge = next(c["edge"] for c in callers["caller_details"] if c["caller_signature"] == "src/index.main")
+    # The same edge dict the call graph carries, reached through the caller view (see the module
+    # docstring on why there is no `tags`): main -> create is resolved by tsc, not inferred.
+    assert main_edge == {"type": "CALL_DEP", "weight": 1, "provenance": ("tsc",)}
+
+
+def test_call_sites(ts_neo4j):
+    sites = ts_neo4j.get_call_sites("src/controllers.UserController.show")
+    assert any(cs.callee_signature == "src/services.UserService.create" for cs in sites)
+    create = next(cs for cs in sites if cs.callee_signature == "src/services.UserService.create")
+    assert create.start_line > 0
+    # What a projected call site keeps is its lines and its resolved target. The receiver and
+    # argument facets are a documented loss (agent-api-reference: "a call site's method_name,
+    # receiver and argument facets"): the :TSBodyNode it is rebuilt from carries neither, so the
+    # in-memory backend's receiver_type == "UserService" has no counterpart here. Asserted, not
+    # skipped — a receiver arriving would mean the projection grew.
+    assert create.method_name == ""
+    assert create.receiver_type is None and create.receiver_expr is None
+    assert create.argument_types == [] and create.type_arguments == []
+
+    lines = ts_neo4j.get_calling_lines("src/services.UserService.create")
+    assert lines == sorted(lines)
+    assert all(line > 0 for line in lines)
+
+    targets = ts_neo4j.get_call_targets("src/controllers.UserController.show")
+    assert "src/services.UserService.create" in targets
+
+
+def test_class_call_graph(ts_neo4j):
+    edges = ts_neo4j.get_class_call_graph("src/controllers.UserController")
+    assert all(isinstance(e, tuple) and len(e) == 2 for e in edges)
+    flat = {s for s, _ in edges} | {t for _, t in edges}
+    assert any("UserController" in s for s in flat)
+
+
+def test_class_hierarchy(ts_neo4j):
+    hierarchy = ts_neo4j.get_class_hierarchy()
+    assert isinstance(hierarchy, nx.DiGraph)
+    assert hierarchy.has_edge("src/models.User", "src/models.Entity")
+
+
+def test_enum_members(ts_neo4j):
+    members = ts_neo4j.get_enum_members("src/models.Role")
+    assert len(members) > 0
+    assert all(m.name for m in members)
+
+
+def test_typescript_file_lookup(ts_neo4j):
+    assert ts_neo4j.get_typescript_file("src/models.User") == "src/models.ts"
+
+
+def test_application_view_round_trips(ts_neo4j):
+    app = ts_neo4j.get_application_view()
+    assert set(app.symbol_table) == set(ts_neo4j.get_symbol_table())
+    assert len(app.call_graph) == ts_neo4j.get_call_graph().number_of_edges()
+
+
+def test_read_only_backend_queries_loaded_db(ts_neo4j):
+    """The read-only backend can query an already-loaded DB with no project_dir / binary."""
+    from cldk.analysis.typescript.neo4j import TSNeo4jBackend
+
+    backend = TSNeo4jBackend(
+        neo4j_uri=NEO4J_URI,
+        neo4j_username=NEO4J_USER,
+        neo4j_password=NEO4J_PASSWORD,
+        application_name=APP_NAME,
+    )
+    try:
+        assert len(backend.get_all_classes()) == 6
+    finally:
+        backend.close()

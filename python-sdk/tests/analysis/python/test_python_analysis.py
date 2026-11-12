@@ -1,0 +1,93 @@
+################################################################################
+# Copyright IBM Corporation 2024
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+"""Smoke tests for the Python analysis façade.
+
+End-to-end coverage requires running ``codeanalyzer-python`` against a real
+project (creates a venv, installs dependencies). Those tests live elsewhere;
+here we only verify the public API contract and the source-code-mode guard.
+"""
+
+import pytest
+
+from cldk import CLDK
+from cldk.utils.exceptions import CldkInitializationException
+
+
+def test_python_analysis_rejects_source_code_mode():
+    with pytest.raises(CldkInitializationException):
+        CLDK(language="python").analysis(source_code="def f(): pass")
+
+
+def test_python_analysis_requires_inputs():
+    with pytest.raises(CldkInitializationException):
+        CLDK(language="python").analysis()
+
+
+def test_use_ray_forwarded_through_facade(monkeypatch, tmp_path):
+    """Regression: CLDK.analysis() must forward use_ray down to the backend.
+
+    use_ray is a Python-only option lifted all the way up to the public API
+    (CLDK.analysis → PythonAnalysis → PyCodeanalyzer → AnalysisOptions.using_ray);
+    the façade must not silently drop it.
+    """
+    captured = {}
+
+    class FakeBackend:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("cldk.analysis.python.python_analysis.PyCodeanalyzer", FakeBackend)
+
+    CLDK(language="python").analysis(project_path=tmp_path, use_ray=True)
+    assert captured["use_ray"] is True
+
+    # Off by default; the façade must forward that faithfully too.
+    captured.clear()
+    CLDK(language="python").analysis(project_path=tmp_path)
+    assert captured["use_ray"] is False
+
+
+def test_cache_dir_keyed_by_language_through_facade(monkeypatch, tmp_path):
+    """cache_dir must reach the backend keyed under the python subdir (<cache_dir>/python)."""
+    captured = {}
+
+    class FakeBackend:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("cldk.analysis.python.python_analysis.PyCodeanalyzer", FakeBackend)
+
+    cache = tmp_path / "mycache"
+    CLDK(language="python").analysis(project_path=tmp_path, cache_dir=cache)
+    assert captured["cache_dir"].name == "python"
+    assert captured["cache_dir"].parent.name == "mycache"
+    assert "analysis_backend_path" not in captured
+
+
+def test_python_ignores_removed_analysis_backend_path(monkeypatch, tmp_path):
+    """analysis_backend_path is removed; the deprecated shim ignores it with a warning."""
+    captured = {}
+
+    class FakeBackend:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("cldk.analysis.python.python_analysis.PyCodeanalyzer", FakeBackend)
+
+    with pytest.warns(DeprecationWarning):
+        CLDK(language="python").analysis(project_path=tmp_path, analysis_backend_path="/some/jar/dir")
+    assert "analysis_backend_path" not in captured
