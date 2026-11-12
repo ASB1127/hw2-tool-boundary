@@ -9,3 +9,5 @@ _minted*/
 html/
 personal_tests/
 targets/
+.env/
+env/
