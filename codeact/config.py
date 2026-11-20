@@ -19,7 +19,7 @@ class Config:
     agent: dict = field(default_factory=dict)
     mcp: dict = field(default_factory=dict)
     sandbox: dict = field(default_factory=dict)
-    target_commit: str = ""
+    target_commits: dict = field(default_factory=dict)
     workspace_prefix: str = "hw1-"
 
     def with_(self, **overrides) -> "Config":
@@ -38,5 +38,5 @@ def load_config(path: Path, fixture: Path) -> Config:
         agent=data["agent"],
         mcp=data["mcp"],
         sandbox=data["sandbox"],
-        target_commit=data.get("target", {}).get("commit", ""),
+        target_commits=data.get("target", {}),
     )

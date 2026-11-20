@@ -58,6 +58,10 @@ class Dispatcher:
                 lines.append(f"... stopped at {SEARCH_MAX_HITS} matches; "
                              "narrow the pattern to see the rest")
             return "\n".join(lines)
+        if tool == "list_directory":
+            if not value:
+                return "no entries"
+            return "\n".join(f"{entry['type']}: {entry['name']}" for entry in value)
         return str(value)
 
     def dispatch(self, request) -> Observation:

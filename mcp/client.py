@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
 class MCPClient:
-    def __init__(self, workspace: str):
+    def __init__(self, workspace: str, config_path: Path):
+        server = json.loads(Path(config_path).read_text(encoding="utf-8"))["mcpServers"]["analysis"]
+        args = list(server["args"])
+        args[args.index("--workspace") + 1] = workspace
         self.params = StdioServerParameters(
-            command="/usr/local/bin/python3.12",
-            args=["-m", "server", "--workspace", workspace],
-            env={
-                "SYSTEM_PYTHON": "/usr/local/bin/python3.12",
-                "PYTHONPATH": "/app/mcp:/app",
-            },
+            command=server["command"],
+            args=args,
+            env=server.get("env"),
         )
         self.transport = None
         self.session = None

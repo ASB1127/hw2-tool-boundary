@@ -32,11 +32,9 @@ def resolve(root: Path, path: str) -> Path:
 
 
 class AgentWorkspace:
-    def __init__(self, config, *, is_owasp: bool, case: str | None = None,
-                 keep: bool = False):
+    def __init__(self, config, *, is_owasp: bool, keep: bool = False):
         self.config = config
         self.is_owasp = is_owasp
-        self.case = case
         self.keep = keep
         self.root: Path | None = None
         self.stash: Path | None = None
@@ -44,9 +42,6 @@ class AgentWorkspace:
     def __enter__(self) -> Path:
         if self.root is not None:
             raise RuntimeError("workspace already open")
-        if self.is_owasp and not self.case:
-            raise ValueError("an OWASP workspace requires the current alert case")
-
         source = Path(self.config.fixture).resolve()
         if not source.is_dir():
             raise FileNotFoundError(f"fixture not found: {source}")
@@ -84,9 +79,9 @@ class AgentWorkspace:
             patterns += OWASP_WITHHELD_GLOBS
 
         for pattern in patterns:
+            if self.is_owasp and pattern == "testcode/BenchmarkTest*.py":
+                continue
             for path in sorted(self.root.glob(pattern)):
-                if path.stem == self.case:
-                    continue
                 target = stash / path.relative_to(self.root)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(path), str(target))

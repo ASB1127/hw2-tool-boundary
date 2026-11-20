@@ -143,7 +143,7 @@ class AgentDAG:
         if self.trace:
             self.trace.event(
                 "tool_request", alert_id=state["alert_id"], tool="code_action",
-                args={}, via="codeact",
+                args={"script": script}, via="codeact",
             )
         execution = self.kernel.run(script)
         output = execution["output"] if execution["ok"] else execution["error"]

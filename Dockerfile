@@ -21,6 +21,7 @@ COPY mcp ./mcp
 COPY shared ./shared
 COPY configs ./configs
 COPY config.schema.json report.schema.json trace.schema.json policy.yaml mcp.json main.py ./
-COPY targets/BenchmarkPython /target
+ARG TARGET=BenchmarkPython
+COPY targets/${TARGET}/ /target/
 
 WORKDIR /sandbox

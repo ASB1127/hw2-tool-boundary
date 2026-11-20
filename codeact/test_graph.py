@@ -1,11 +1,12 @@
 import json
 
 from langchain_core.messages import AIMessage
+import pytest
 
 from dispatcher import Dispatcher
-from graph import build_graph, opening_messages
+from graph import AgentDAG, build_graph, opening_messages
 from kernel import Kernel
-from trace import Trace
+from trace import Trace, read_events
 
 
 class Runtime:
@@ -21,6 +22,23 @@ class Runtime:
     def call(self, alert_id, messages):
         self.calls += 1
         return next(self.replies)
+
+
+@pytest.mark.parametrize("script", ["print('hello')", "raise ValueError('failed')"])
+def test_code_action_trace_records_attempted_script(tmp_path, script):
+    with Trace("test", tmp_path / "trace.jsonl") as trace:
+        AgentDAG(trace, Runtime([]), Kernel(tmp_path)).code_action({
+            "alert_id": "a",
+            "messages": [AIMessage(content=f"```python\n{script}\n```")],
+        })
+        trace.terminal("complete")
+
+    events = read_events(tmp_path / "trace.jsonl")
+    assert events[0]["kind"] == "tool_request"
+    assert events[0]["args"] == {"script": script}
+    assert events[0]["via"] == "codeact"
+    assert events[1]["kind"] == "tool_result"
+    assert events[1]["ok"] == (not script.startswith("raise"))
 
 
 def test_invalid_classification_label_returns_to_controller(tmp_path):
@@ -95,6 +113,21 @@ def test_owasp_dispatcher_searches_selected_alert_only(tmp_path):
         trace.terminal("complete")
 
     assert result.result == "testcode/BenchmarkTest00011.py:1: sql = 'selected'"
+
+
+def test_list_directory_has_model_readable_rendering(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "src").mkdir()
+    (workspace / "app.py").write_text("pass\n")
+
+    with Trace("test", tmp_path / "trace.jsonl") as trace:
+        dispatcher = Dispatcher(workspace, trace, "a")
+        assert dispatcher({"tool": "list_directory", "args": {}}).result == (
+            "file: app.py\ndirectory: src"
+        )
+        assert dispatcher({"tool": "list_directory", "args": {"path": "src"}}).result == "no entries"
+        trace.terminal("complete")
 
 
 def test_remediation_requires_a_successful_code_action_before_edited(tmp_path):

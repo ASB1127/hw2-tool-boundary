@@ -44,8 +44,16 @@ Examples, in `examples/`:
 Fixtures, in `fixtures/`: `injection.patch` is the planted injection for the live
 runs, and `fixtures/README.md` says how to apply and remove it.
 
-Build the sandbox image from your repository first, with each target at
-`/target`, and register the Anthropic provider (brief, Section 9.1 gives both).
+Build one sandbox image per target; each command copies its selected pinned
+checkout to `/target`. Then register the Anthropic provider (brief, Section 9.1
+gives both).
+
+```bash
+docker build --build-arg TARGET=BenchmarkPython -t hw2-benchmark-python .
+docker build --build-arg TARGET=Radicale -t hw2-radicale .
+docker build --build-arg TARGET=sglang -t hw2-sglang .
+```
+
 Then the two launch commands, abridged from the brief and shown for OWASP:
 create the sandbox from your image and policy, then copy the granted entries of
 the target into `/sandbox/work` and run your agent on the copy, with its config

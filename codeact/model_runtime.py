@@ -1,9 +1,12 @@
+import json
 import os
 from pathlib import Path
 
 import tiktoken
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from config import Config
+from tools import ToolBundle
 from trace import TerminalStatus, Trace
 
 
@@ -49,12 +52,14 @@ class ModelRuntime:
         if self.config.model.get("provider") != "openai":
             return 0
         encoding = tiktoken.encoding_for_model(self.config.model["name"])
-        content_tokens = sum(
-            len(encoding.encode(message.content if isinstance(message.content, str)
-                                else str(message.content)))
-            for message in messages
-        )
-        return content_tokens + 3 * len(messages) + 3
+        tokens = 3 * len(messages) + 3
+        for message in messages:
+            content = message.content if isinstance(message.content, str) else json.dumps(message.content)
+            tokens += len(encoding.encode(content))
+            if getattr(message, "tool_calls", None):
+                tokens += len(encoding.encode(json.dumps(message.tool_calls)))
+        schemas = [convert_to_openai_tool(tool) for tool in ToolBundle.get_all_tools()]
+        return tokens + len(encoding.encode(json.dumps(schemas)))
 
     @staticmethod
     def _usage(reply) -> dict:

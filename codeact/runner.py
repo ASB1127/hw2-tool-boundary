@@ -50,7 +50,7 @@ def scripted_model(messages, output_allowance):
     )
 
 
-def scripted_classifier(alert: Alert, workspace: Path, trace: Trace,
+def classify_alert_with_model(alert: Alert, workspace: Path, trace: Trace,
                         config: Config, runtime: ModelRuntime, kernel: Kernel) -> dict:
     return build_graph(trace, runtime, kernel, Dispatcher(
         workspace, trace, alert["alert_id"],
@@ -63,7 +63,7 @@ def scripted_classifier(alert: Alert, workspace: Path, trace: Trace,
     })
 
 
-def run(config: Config, output: Path, classifier=scripted_classifier,
+def run(config: Config, output: Path, classifier=classify_alert_with_model,
         invoke_model=None) -> dict:
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -315,7 +315,7 @@ def _report(config: Config, alerts: list[Alert], rows: dict, trace: Trace,
             terminal_status: str, error: Exception | None) -> dict:
     usage = trace.usage.as_dict()
     report = {
-        "target": {"input": str(config.fixture), "commit": config.target_commit or _commit(config.fixture)},
+        "target": {"input": str(config.fixture), "commit": config.target_commits["owasp"]},
         "scan": {
             "bandit_version": config.scan["bandit_version"],
             "min_severity": config.scan["min_severity"],
@@ -335,9 +335,3 @@ def _report(config: Config, alerts: list[Alert], rows: dict, trace: Trace,
 
 def _is_owasp(config: Config) -> bool:
     return config.scan["paths"] == ["testcode/BenchmarkTest000*.py"]
-
-
-def _commit(fixture: Path) -> str:
-    return subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=fixture, text=True
-    ).strip()

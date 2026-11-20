@@ -20,6 +20,7 @@ class TerminalStatus(str,Enum):
 
 class EventKind(str,Enum):
     __str__ = str.__str__
+    DISCOVERY = "discovery"
     MODEL_CALL = "model_call"
     TOOL_REQUEST = "tool_request"
     TOOL_RESULT = "tool_result"

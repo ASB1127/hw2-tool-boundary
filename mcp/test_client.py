@@ -1,7 +1,17 @@
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 from client import MCPClient
+
+
+MCP_CONFIG = Path(__file__).parent.parent / "mcp.json"
+
+
+def test_client_starts_server_with_only_its_workspace():
+    client = MCPClient("/sandbox/work/target", MCP_CONFIG)
+
+    assert client.params.args == ["-m", "server", "--workspace", "/sandbox/work/target"]
 
 
 def test_client_initializes_discovers_calls_and_closes(monkeypatch):
@@ -38,7 +48,7 @@ def test_client_initializes_discovers_calls_and_closes(monkeypatch):
     monkeypatch.setattr("client.ClientSession", Session)
 
     async def run():
-        client = MCPClient("/sandbox/work/target")
+        client = MCPClient("/sandbox/work/target", MCP_CONFIG)
         assert await client.connect() == ["locate"]
         assert await client.call_tool("locate", {"path": "a.py", "line": 1}) == {
             "name": "locate", "arguments": {"path": "a.py", "line": 1},

@@ -1,13 +1,9 @@
-import inspect
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-
-from tools import SEARCH_MAX_HITS, TOOLS
+from client import MCPClient
+from backend import SEARCH_MAX_HITS
+from jsonschema import ValidationError, validate
 from trace import Trace
-from workspace import PathEscapeException
-
-def registry_from_enum(tools=TOOLS) -> dict:
-     return {member.name: member.value[0] for member in tools}
 
 
 @dataclass
@@ -20,42 +16,51 @@ class Observation:
     def to_dict(self):
         return asdict(self)
 
+
 class Dispatcher:
-    def __init__(self, ws: Path, trace: Trace, alert_id: str,
-                 registry: dict | None = None):
+    def __init__(self, ws: Path, trace: Trace, alert_id: str, registry: dict, client: MCPClient):
         self.ws = Path(ws)
         self.trace = trace
         self.alert_id = alert_id
-        self.registry = registry_from_enum() if registry is None else registry
+        self.registry = registry
+        self.client = client
 
-    def __call__(self, request:dict) -> Observation:
-        return self.dispatch(request)
+    async def __call__(self, request: dict) -> Observation:
+        return await  self.dispatch(request)
 
-    def _refuse(self, tool: str, args: dict, reason: str) -> Observation:
+
+    def _refuse(self, tool: str, args: dict, reason: str,
+                refused_by: str = "dispatcher") -> Observation:
         obs = Observation(tool=tool, args=args, ok=False, result=reason)
         self.trace.event("tool_result", alert_id=self.alert_id,
-                         tool=tool, ok=False, error=reason)
+                         tool=tool, ok=False, error=reason, via="mcp",
+                         refused_by=refused_by)
         return obs
 
     def _observe(self, tool: str, args: dict, result: str) -> Observation:
         obs = Observation(tool=tool, args=args, ok=True, result=result)
         self.trace.event("tool_result", alert_id=self.alert_id,
-                         tool=tool, ok=True, chars=len(result))
+                         tool=tool, ok=True, chars=len(result), via="mcp")
         return obs
 
-    def _render(self, tool: str, value) -> str:
-        """Tool return value -> the string the model reads."""
+    def _render(self, tool: str, result) -> str:
+        """MCP tool result -> the string the model reads."""
+        if result.is_error:
+            return "\n".join(getattr(content, "text", str(content))
+                             for content in result.content)
         if tool == "search":
-            if not value:
+            hits = result.structured_content["result"]
+            if not hits:
                 return "no matches"
-            lines = [f"{h['file']}:{h['line']}: {h['text']}" for h in value]
-            if len(value) >= SEARCH_MAX_HITS:
+            lines = [f"{hit['file']}:{hit['line']}: {hit['text']}" for hit in hits]
+            if len(hits) >= SEARCH_MAX_HITS:
                 lines.append(f"... stopped at {SEARCH_MAX_HITS} matches; "
                              "narrow the pattern to see the rest")
             return "\n".join(lines)
-        return str(value)
+        return "\n".join(getattr(content, "text", str(content))
+                         for content in result.content)
 
-    def dispatch(self, request) -> Observation:
+    async def dispatch(self, request) -> Observation:
         if not isinstance(request, dict):
             tool, args, reason = "invalid_request", {}, "tool request must be an object"
         else:
@@ -66,30 +71,25 @@ class Dispatcher:
                 tool, reason = "invalid_request", "tool must be a non-empty string"
             elif not isinstance(args, dict):
                 args, reason = {}, "tool args must be an object"
-        self.trace.event("tool_request", alert_id=self.alert_id,
-                         tool=tool, args=args)
+        self.trace.event("tool_request", alert_id=self.alert_id, tool=tool, args=args,
+                         via="mcp")
         if reason:
             return self._refuse(tool, args, reason)
-        function = self.registry.get(tool)
-        if function is None:
-            return self._refuse(tool, args,
-                                f"unregistered tool {tool!r}; "
+        definition = self.registry.get(tool)
+        if definition is None:
+            return self._refuse(tool, args, f"unregistered tool {tool!r}; "
                                 f"available: {', '.join(sorted(self.registry))}")
-
         try:
-            inspect.signature(function).bind(self.ws, **args)
-        except TypeError as e:
-            return self._refuse(tool, args, f"incorrect args for {tool}: {e}")
-
+            validate(args, definition.input_schema)
+        except ValidationError as error:
+            return self._refuse(tool, args,
+                                f"incorrect args for {tool}: {error.message}")
         try:
-            res = function(self.ws, **args)
-        except PathEscapeException as e:
-            return self._refuse(tool, args, f"refused: {e}")
-        except (FileNotFoundError, ValueError) as e:
-            return self._refuse(tool, args, f"tool error: {e}")
-        except TypeError as e:
-            return self._refuse(tool, args, f"bad argument type for {tool}: {e}")
-        
-        return self._observe(tool, args, self._render(tool, res))
-
-
+            result = await self.client.call_tool(tool, args)
+        except Exception as error:
+            return self._refuse(tool, args, f"MCP call failed: {error}")
+        rendered = self._render(tool, result)
+        if result.is_error:
+            refused_by = "kernel" if rendered.startswith("refused: kernel: ") else "server"
+            return self._refuse(tool, args, rendered, refused_by=refused_by)
+        return self._observe(tool, args, rendered)
