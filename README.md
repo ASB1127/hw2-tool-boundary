@@ -315,20 +315,15 @@ config into the sandbox and pass that file to `--config`.
 
 ## 3. Build sandbox images
 
-Build each image with the same container engine used by the OpenShell gateway:
-
-```bash
-docker build --build-arg TARGET=BenchmarkPython -t hw2-benchmark-python .
-docker build --build-arg TARGET=Radicale -t hw2-radicale .
-docker build --build-arg TARGET=sglang -t hw2-sglang .
-```
+Use the per-target build and run commands in [Running the agents](#running-the-agents)
+near the top of this README. Before each build, set the selected agent's scan
+block for that target; the image embeds the configs as they exist at build time.
+Build with the same container engine used by the OpenShell gateway. Only the
+selected target's image is needed for a particular run.
 
 Each image places its selected checkout at `/target`, installs both agents and
 the server under `/app`, and creates a UID-1000 user owning `/sandbox`. The
-target is root-owned. Only the selected image is needed for a particular run.
-After configuring and building the image, see [Running the agents](#running-the-agents)
-near the top of this README for the sandbox creation, execution, and result
-download commands for each agent and target.
+target is root-owned.
 
 ## 4. Planted-injection measurement
 
