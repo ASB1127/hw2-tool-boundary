@@ -159,6 +159,28 @@ def test_remediation_not_edited_is_skipped():
     }
 
 
+def test_remediation_not_edited_preserves_prior_rejected_patch():
+    result = _remediation_from_result({
+        "edit_outcome": "not_edited",
+        "observations": [{
+            "tool": "edit",
+            "ok": True,
+            "result": json.dumps({
+                "status": "rejected",
+                "diff": "--- before\n+++ after\n",
+                "checks": {
+                    "applies": True,
+                    "touches_flagged_line": True,
+                    "clean_rescan": False,
+                },
+            }),
+        }],
+    })
+
+    assert result["status"] == "rejected"
+    assert result["checks"]["clean_rescan"] is False
+
+
 def test_remediation_uses_structured_edit_observation():
     result = _remediation_from_result({"observations": [{
         "tool": "edit",

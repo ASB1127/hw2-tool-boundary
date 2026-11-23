@@ -267,10 +267,6 @@ def _skipped_remediation() -> dict:
 
 
 def _remediation_from_result(result: dict) -> dict:
-    if result.get("edit_outcome") == "not_edited":
-        skipped = _skipped_remediation()
-        skipped["summary"] = result.get("remediation_summary", "")
-        return skipped
     for observation in reversed(result.get("observations", [])):
         if observation.get("tool") != "edit" or not observation.get("ok"):
             continue
@@ -280,6 +276,10 @@ def _remediation_from_result(result: dict) -> dict:
             break
         if {"status", "diff", "checks"} <= patch.keys():
             return {key: patch[key] for key in ("status", "diff", "checks")}
+    if result.get("edit_outcome") == "not_edited":
+        skipped = _skipped_remediation()
+        skipped["summary"] = result.get("remediation_summary", "")
+        return skipped
     rejected = _skipped_remediation()
     rejected["status"] = "rejected"
     return rejected
