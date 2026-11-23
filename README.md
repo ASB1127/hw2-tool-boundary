@@ -257,14 +257,12 @@ in this repository or in commands saved to a trace.
 
 The supplied configs use OpenAI and `policy.yaml` permits the image's Python
 interpreter to reach `api.openai.com`. Set `OPENAI_API_KEY` in your shell without
-recording its value. Export the OpenShell OpenAI provider profile, edit its
-top-level `binaries` list to contain `/usr/local/bin/python3.12`, and import it;
-then create the provider from the existing shell credential:
+recording its value. Import the included OpenShell OpenAI provider profile, whose
+top-level `binaries` list names `/usr/local/bin/python3.12`, then create the
+provider from the existing shell credential:
 
 ```bash
-openshell provider profile export openai > /tmp/hw2-openai.yaml
-# Edit /tmp/hw2-openai.yaml: set the top-level binaries list as described above.
-openshell provider profile import -f /tmp/hw2-openai.yaml --global
+openshell provider profile import -f providers/openai.yaml --global
 openshell provider create --name openai --type openai --from-existing
 ```
 
@@ -328,11 +326,27 @@ docker build --build-arg TARGET=sglang -t hw2-sglang .
 Each image places its selected checkout at `/target`, installs both agents and
 the server under `/app`, and creates a UID-1000 user owning `/sandbox`. The
 target is root-owned. Only the selected image is needed for a particular run.
+After configuring and building the image, see [Running the agents](#running-the-agents)
+near the top of this README for the sandbox creation, execution, and result
+download commands for each agent and target.
 
 ## 4. Planted-injection measurement
 
 The fixture targets OWASP case `BenchmarkTest00011`; details and the original
 apply/remove instructions are in [`fixtures/README.md`](fixtures/README.md).
+Before building the injection image, ensure **both** `configs/codeact.toml` and
+`configs/mcp.toml` use the OWASP scan block below. In particular, restore it if
+either config was changed for Radicale or SGLang; the loop runs both agents
+against OWASP. The image embeds the configs at build time.
+
+```toml
+[scan]
+paths = ["testcode/BenchmarkTest000*.py"]
+exclude = []
+min_severity = "MEDIUM"
+bandit_version = "1.9.4"
+```
+
 The following applies the patch to the pinned checkout, then builds a separate
 injection image. Check for other edits before applying or removing the patch.
 
@@ -391,22 +405,21 @@ The design report is `Report.pdf`; its editable source is `Report.tex`.
 
 ## 6. CodeAct prompt and action interface
 
-The generation prompt submitted to the coding assistant is
-[`codeact/prompts/codeact_prompt_generation_prompt.md`](codeact/prompts/codeact_prompt_generation_prompt.md).
-The resulting runtime prompt is
+**To run CodeAct, use the existing runtime prompt:**
 [`codeact/prompts/codeact_agent_prompt.md`](codeact/prompts/codeact_agent_prompt.md).
-To repeat the prompt-writing process, clone the SDK and ask Claude Code or Codex
-to follow the exact generation prompt file after inspecting the SDK:
+You do not need to generate a prompt or clone an SDK.
 
-```bash
-git clone https://github.com/codellm-devkit/python-sdk.git /tmp/cldk-python-sdk
-```
+**To reproduce the prompt-writing process** (optional):
 
-The generation prompt refers to `python-sdk/`; the repository already includes
-that SDK snapshot at this path. To regenerate, start the coding assistant at the
-repository root, provide the full contents of the generation prompt, and have it
-inspect that snapshot before writing the runtime prompt. Review the output. The
-clone above is for independent SDK inspection; it is not required for the build.
+1. Start Claude Code or Codex at the repository root.
+2. Provide the contents of
+   [`codeact/prompts/codeact_prompt_generation_prompt.md`](codeact/prompts/codeact_prompt_generation_prompt.md).
+3. Ask the assistant to inspect the included `python-sdk/` snapshot and follow
+   the generation prompt to write the runtime prompt.
+4. Review the generated output before using it.
+
+The [upstream SDK](https://github.com/codellm-devkit/python-sdk) is optional
+reference material and may differ from the snapshot used here.
 
 `codeact/prompts/__init__.py` loads the runtime prompt from the Markdown file.
 It instructs the model to initialize CLDK on its writable alert workspace and
@@ -462,3 +475,4 @@ out-of-scope OWASP reads are refused. Server refusals are MCP tool errors;
 malformed arguments can instead fail schema validation. Tool descriptions tell
 the model how to use tools; they are not themselves access controls. OpenShell
 provides a separate filesystem and network boundary.
+
