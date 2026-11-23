@@ -2,10 +2,16 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-from client import MCPClient
+from mcp.client import stdio as mcp_stdio
+
+from client import MCP_SHUTDOWN_GRACE_SECONDS, MCPClient
 
 
 MCP_CONFIG = Path(__file__).parent.parent / "mcp.json"
+
+
+def test_client_extends_mcp_shutdown_grace_period():
+    assert mcp_stdio.PROCESS_TERMINATION_TIMEOUT == MCP_SHUTDOWN_GRACE_SECONDS == 15.0
 
 
 def test_client_starts_server_with_only_its_workspace():

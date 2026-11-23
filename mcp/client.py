@@ -4,7 +4,13 @@ import json
 from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
+from mcp.client import stdio as mcp_stdio
 from mcp.client.stdio import stdio_client
+
+
+MCP_SHUTDOWN_GRACE_SECONDS = 15.0
+# shortcut: waits at most 15 seconds; increase only if clean shutdowns exceed it.
+mcp_stdio.PROCESS_TERMINATION_TIMEOUT = MCP_SHUTDOWN_GRACE_SECONDS
 
 
 class MCPClient:
