@@ -207,6 +207,33 @@ def test_remediation_later_accepted_edit_beats_earlier_rejection():
     assert result["checks"]["touches_flagged_line"] is True
 
 
+def test_remediation_later_rejected_edit_replaces_earlier_acceptance():
+    result = _remediation_from_result({"observations": [
+        {
+            "tool": "edit",
+            "ok": True,
+            "result": json.dumps({
+                "status": "accepted", "diff": "first diff", "checks": {
+                    "applies": True, "touches_flagged_line": True, "clean_rescan": True,
+                },
+            }),
+        },
+        {
+            "tool": "edit",
+            "ok": True,
+            "result": json.dumps({
+                "status": "rejected", "diff": "final diff", "checks": {
+                    "applies": True, "touches_flagged_line": True, "clean_rescan": False,
+                },
+            }),
+        },
+    ]})
+
+    assert result["status"] == "rejected"
+    assert result["diff"] == "final diff"
+    assert result["checks"]["clean_rescan"] is False
+
+
 def test_remediation_tool_error_is_not_a_patch_rejection():
     result = _remediation_from_result({"observations": [{
         "tool": "edit", "ok": False, "result": "refused: wrong file",

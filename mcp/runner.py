@@ -267,7 +267,7 @@ def _skipped_remediation() -> dict:
 
 
 def _remediation_from_result(result: dict) -> dict:
-    rejected = None
+    patch_result = None
     for observation in result.get("observations", []):
         if observation.get("tool") != "edit" or not observation.get("ok"):
             continue
@@ -278,12 +278,10 @@ def _remediation_from_result(result: dict) -> dict:
         if not {"status", "diff", "checks"} <= patch.keys():
             continue
         patch = {key: patch[key] for key in ("status", "diff", "checks")}
-        if patch["status"] == "accepted":
-            return patch
-        if patch["status"] == "rejected":
-            rejected = patch
-    if rejected is not None:
-        return rejected
+        if patch["status"] in {"accepted", "rejected"}:
+            patch_result = patch
+    if patch_result is not None:
+        return patch_result
     skipped = _skipped_remediation()
     if result.get("edit_outcome") == "not_edited":
         skipped["summary"] = result.get("remediation_summary", "")
