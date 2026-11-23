@@ -10,4 +10,9 @@ html/
 personal_tests/
 targets/
 .env/
+.env
+.env.*
 env/
+tiktoken-cache/
+*.fdb_latexmk
+*.fls

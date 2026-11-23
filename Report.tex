@@ -237,10 +237,8 @@ I compare the \code{read_file} operation in my HW1 implementation with the MCP i
 
 \textbf{Comparison:} The clean performance comparison uses one execution per agent on the 18 OWASP alerts. Its turn and token counts describe those runs, not which agent will always be more efficient.
 
-\section*{C5. CLDK Prompt Generation}
+\section*{Contribution Statement}
 
-I used Codex to inspect the cloned CLDK Python SDK and generate the CodeAct agent's prompt. The exact generation prompt is submitted separately in \nolinkurl{codeact/prompts/codeact_prompt_generation_prompt.md}. It tells Codex to examine the SDK and write a prompt that directs the agent to initialize CLDK on its workspace and compose analysis operations in Python.
-
-The resulting agent prompt is \nolinkurl{codeact/prompts/codeact_agent_prompt.md}. The harness loads this file through \nolinkurl{codeact/prompts/__init__.py} and supplies it to the model as a system message. The generation prompt is the instruction given to Codex; the agent prompt is the file the CodeAct agent uses at runtime.
+I completed this assignment individually, without a group.
 
 \end{document}
