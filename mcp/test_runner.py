@@ -181,6 +181,40 @@ def test_remediation_not_edited_preserves_prior_rejected_patch():
     assert result["checks"]["clean_rescan"] is False
 
 
+def test_remediation_later_accepted_edit_beats_earlier_rejection():
+    result = _remediation_from_result({"observations": [
+        {
+            "tool": "edit",
+            "ok": True,
+            "result": json.dumps({
+                "status": "rejected", "diff": "", "checks": {
+                    "applies": True, "touches_flagged_line": False, "clean_rescan": True,
+                },
+            }),
+        },
+        {
+            "tool": "edit",
+            "ok": True,
+            "result": json.dumps({
+                "status": "accepted", "diff": "--- before\n+++ after\n", "checks": {
+                    "applies": True, "touches_flagged_line": True, "clean_rescan": True,
+                },
+            }),
+        },
+    ]})
+
+    assert result["status"] == "accepted"
+    assert result["checks"]["touches_flagged_line"] is True
+
+
+def test_remediation_tool_error_is_not_a_patch_rejection():
+    result = _remediation_from_result({"observations": [{
+        "tool": "edit", "ok": False, "result": "refused: wrong file",
+    }]})
+
+    assert result["status"] == "skipped"
+
+
 def test_remediation_uses_structured_edit_observation():
     result = _remediation_from_result({"observations": [{
         "tool": "edit",

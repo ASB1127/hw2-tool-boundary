@@ -267,22 +267,27 @@ def _skipped_remediation() -> dict:
 
 
 def _remediation_from_result(result: dict) -> dict:
-    for observation in reversed(result.get("observations", [])):
+    rejected = None
+    for observation in result.get("observations", []):
         if observation.get("tool") != "edit" or not observation.get("ok"):
             continue
         try:
             patch = json.loads(observation["result"])
         except (KeyError, json.JSONDecodeError):
-            break
-        if {"status", "diff", "checks"} <= patch.keys():
-            return {key: patch[key] for key in ("status", "diff", "checks")}
+            continue
+        if not {"status", "diff", "checks"} <= patch.keys():
+            continue
+        patch = {key: patch[key] for key in ("status", "diff", "checks")}
+        if patch["status"] == "accepted":
+            return patch
+        if patch["status"] == "rejected":
+            rejected = patch
+    if rejected is not None:
+        return rejected
+    skipped = _skipped_remediation()
     if result.get("edit_outcome") == "not_edited":
-        skipped = _skipped_remediation()
         skipped["summary"] = result.get("remediation_summary", "")
-        return skipped
-    rejected = _skipped_remediation()
-    rejected["status"] = "rejected"
-    return rejected
+    return skipped
 
 
 def _settle(rows: dict, trace: Trace, alert: Alert, status: str,
