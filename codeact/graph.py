@@ -147,6 +147,8 @@ class AgentDAG:
             )
         execution = self.kernel.run(script)
         output = execution["output"] if execution["ok"] else execution["error"]
+        if execution["stderr"]:
+            output += f"\nstderr:\n{execution['stderr']}"
         if self.trace:
             fields = {"ok": execution["ok"], "via": "codeact"}
             fields["chars"] = len(execution["output"])

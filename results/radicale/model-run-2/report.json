@@ -1,0 +1,298 @@
+{
+  "target": {
+    "input": "/sandbox/work/target",
+    "commit": "eff8027f3dc4910be1659ee71f4b4a454ade5a8c"
+  },
+  "scan": {
+    "bandit_version": "1.9.4",
+    "min_severity": "MEDIUM",
+    "alert_count": 10
+  },
+  "budget": {
+    "max_tokens": 450000,
+    "used_tokens": 355778,
+    "exhausted": false
+  },
+  "alerts": [
+    {
+      "alert_id": "oauth2-60-B113-9e6ff47978ba",
+      "test_id": "B113",
+      "path": "radicale/auth/oauth2.py",
+      "line": 60,
+      "severity": "MEDIUM",
+      "confidence": "LOW",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The code performs a blocking outbound HTTP POST to a configured OAuth2 token endpoint via requests.post(...) without a timeout. If the endpoint is slow or unresponsive, authentication can hang indefinitely, enabling denial of service against login handling.",
+      "evidence": [
+        {
+          "path": "radicale/auth/oauth2.py",
+          "start_line": 60,
+          "end_line": 62
+        }
+      ],
+      "remediation": {
+        "status": "rejected",
+        "diff": "--- a/radicale/auth/oauth2.py\n+++ b/radicale/auth/oauth2.py\n@@ -61 +61 @@\n-                self._endpoint, data=req_params, headers=req_headers\n+                self._endpoint, data=req_params, headers=req_headers, timeout=10\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": false,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "__init__-227-B324-b51fec0fcc63",
+      "test_id": "B324",
+      "path": "radicale/hook/email/__init__.py",
+      "line": 227,
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "label": 0,
+      "status": "classified",
+      "rationale": "The SHA1 hash is used only as a deterministic fingerprint to compare event-detail dictionaries for change detection, not for authentication, password storage, signatures, or any security-sensitive purpose.",
+      "evidence": [
+        {
+          "path": "radicale/hook/email/__init__.py",
+          "start_line": 221,
+          "end_line": 227
+        }
+      ],
+      "remediation": {
+        "status": "skipped",
+        "diff": "",
+        "checks": {
+          "applies": null,
+          "touches_flagged_line": null,
+          "clean_rescan": null
+        }
+      }
+    },
+    {
+      "alert_id": "files-131-B301-d7e275a8300f",
+      "test_id": "B301",
+      "path": "radicale/sharing/files.py",
+      "line": 131,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The code deserializes a pickle file from disk with `pickle.load(fb)` in `Sharing.database_get_sharing`. The file path is derived from `PathOrToken` and storage paths, and the loaded object is then trusted and used as application data. Because pickle deserialization can execute attacker-controlled code if the file contents are modified, this is a valid unsafe deserialization finding.",
+      "evidence": [
+        {
+          "path": "radicale/sharing/files.py",
+          "start_line": 130,
+          "end_line": 131
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/radicale/sharing/files.py\n+++ b/radicale/sharing/files.py\n@@ -16,0 +17 @@\n+import json\n@@ -18 +18,0 @@\n-import pickle\n@@ -130,2 +130,2 @@\n-            with open(sharing_config_file, \"rb\") as fb:\n-                (version, row) = pickle.load(fb)\n+            with open(sharing_config_file, \"r\", encoding=\"utf-8\") as fb:\n+                (version, row) = json.load(fb)\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "files-208-B301-700c66e22252",
+      "test_id": "B301",
+      "path": "radicale/sharing/files.py",
+      "line": 208,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The function iterates over files from a server-side sharing database directory and deserializes each file with `pickle.load(fb)`. Although pickle is inherently unsafe for untrusted input, here the source is local database files under an application-controlled path accessed under a storage lock, not direct user-supplied data in this code path.",
+      "evidence": [
+        {
+          "path": "radicale/sharing/files.py",
+          "start_line": 199,
+          "end_line": 208
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/radicale/sharing/files.py\n+++ b/radicale/sharing/files.py\n@@ -16,0 +17 @@\n+import json\n@@ -18 +18,0 @@\n-import pickle\n@@ -130,2 +130,2 @@\n-            with open(sharing_config_file, \"rb\") as fb:\n-                (version, row) = pickle.load(fb)\n+            with open(sharing_config_file, \"r\", encoding=\"utf-8\") as fb:\n+                (version, row) = json.load(fb)\n@@ -207,2 +207,2 @@\n-                    with open(entry, \"rb\") as fb:\n-                        (version, row) = pickle.load(fb)\n+                    with open(entry, \"r\", encoding=\"utf-8\") as fb:\n+                        (version, row) = json.load(fb)\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "files-316-B301-61102b08b15c",
+      "test_id": "B301",
+      "path": "radicale/sharing/files.py",
+      "line": 316,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The code deserializes a pickle from a file path derived from function inputs (`ShareType` and `PathOrToken`) using `pickle.load(fb)`. Pickle deserialization can execute attacker-controlled code if the file contents are modified or supplied from an untrusted source; the surrounding file existence check and lock do not make the data trusted.",
+      "evidence": [
+        {
+          "path": "radicale/sharing/files.py",
+          "start_line": 316,
+          "end_line": 316
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/radicale/sharing/files.py\n+++ b/radicale/sharing/files.py\n@@ -16,0 +17 @@\n+import json\n@@ -18 +18,0 @@\n-import pickle\n@@ -130,2 +130,2 @@\n-            with open(sharing_config_file, \"rb\") as fb:\n-                (version, row) = pickle.load(fb)\n+            with open(sharing_config_file, \"r\", encoding=\"utf-8\") as fb:\n+                (version, row) = json.load(fb)\n@@ -207,2 +207,2 @@\n-                    with open(entry, \"rb\") as fb:\n-                        (version, row) = pickle.load(fb)\n+                    with open(entry, \"r\", encoding=\"utf-8\") as fb:\n+                        (version, row) = json.load(fb)\n@@ -315,2 +315,2 @@\n-            with open(sharing_config_file, \"rb\") as fb:\n-                (version, row) = pickle.load(fb)\n+            with open(sharing_config_file, \"r\", encoding=\"utf-8\") as fb:\n+                (version, row) = json.load(fb)\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "files-374-B301-6ea694686549",
+      "test_id": "B301",
+      "path": "radicale/sharing/files.py",
+      "line": 374,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The code deserializes a pickle file from disk using `pickle.load(fb)` after only checking that the computed file exists. The file path is derived from input (`PathOrToken`) and then opened directly, so a modified or attacker-controlled share-config file would trigger unsafe deserialization before any version check.",
+      "evidence": [
+        {
+          "path": "radicale/sharing/files.py",
+          "start_line": 373,
+          "end_line": 374
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/radicale/sharing/files.py\n+++ b/radicale/sharing/files.py\n@@ -16,0 +17 @@\n+import json\n@@ -18 +18,0 @@\n-import pickle\n@@ -130,2 +130,2 @@\n-            with open(sharing_config_file, \"rb\") as fb:\n-                (version, row) = pickle.load(fb)\n+            with open(sharing_config_file, \"r\", encoding=\"utf-8\") as fb:\n+                (version, row) = json.load(fb)\n@@ -207,2 +207,2 @@\n-                    with open(entry, \"rb\") as fb:\n-                        (version, row) = pickle.load(fb)\n+                    with open(entry, \"r\", encoding=\"utf-8\") as fb:\n+                        (version, row) = json.load(fb)\n@@ -315,2 +315,2 @@\n-            with open(sharing_config_file, \"rb\") as fb:\n-                (version, row) = pickle.load(fb)\n+            with open(sharing_config_file, \"r\", encoding=\"utf-8\") as fb:\n+                (version, row) = json.load(fb)\n@@ -350,2 +350,2 @@\n-                with open(sharing_config_file, \"wb\") as fb:\n-                    pickle.dump((version, row), fb)\n+                with open(sharing_config_file, \"w\", encoding=\"utf-8\") as fb:\n+                    json.dump((version, row), fb)\n@@ -373,2 +373,2 @@\n-            with open(sharing_config_file, \"rb\") as fb:\n-                (version, row) = pickle.load(fb)\n+            with open(sharing_config_file, \"r\", encoding=\"utf-8\") as fb:\n+                (version, row) = json.load(fb)\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "cache-109-B301-005a18046420",
+      "test_id": "B301",
+      "path": "radicale/storage/multifilesystem/cache.py",
+      "line": 109,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The code deserializes a pickle file from a path derived from `href` inside the on-disk `.Radicale.cache/item` cache directory using `pickle.load(f)`. Even though it checks a stored hash after loading, the unsafe deserialization already happened, and the file contents are read from the filesystem rather than being cryptographically trusted. This makes the Bandit finding valid.",
+      "evidence": [
+        {
+          "path": "radicale/storage/multifilesystem/cache.py",
+          "start_line": 108,
+          "end_line": 110
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/radicale/storage/multifilesystem/cache.py\n+++ b/radicale/storage/multifilesystem/cache.py\n@@ -19,0 +20 @@\n+import ast\n@@ -22 +22,0 @@\n-import pickle\n@@ -100 +100 @@\n-            pickle.dump((cache_hash, *content), fb)\n+            fb.write(repr((cache_hash, *content)).encode(self._encoding))\n@@ -109 +109 @@\n-                hash_, *remainder = pickle.load(f)\n+                hash_, *remainder = ast.literal_eval(f.read().decode(\"utf-8\"))\n@@ -121 +121 @@\n-        except (pickle.UnpicklingError, ValueError) as e:\n+        except (SyntaxError, UnicodeDecodeError, ValueError) as e:\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "history-53-B301-fc6223a5c14e",
+      "test_id": "B301",
+      "path": "radicale/storage/multifilesystem/history.py",
+      "line": 53,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The code deserializes a pickle file from a per-collection history cache path using a caller-controlled `href` filename, but that file is stored and later read only by this same code path, which writes a simple `[etag, history_etag]` value via `pickle.dump`. On load failure it catches unpickling errors and reinitializes the cache entry. This is a local trusted cache format, not deserialization of external user-supplied content.",
+      "evidence": [
+        {
+          "path": "radicale/storage/multifilesystem/history.py",
+          "start_line": 52,
+          "end_line": 53
+        },
+        {
+          "path": "radicale/storage/multifilesystem/history.py",
+          "start_line": 69,
+          "end_line": 72
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/radicale/storage/multifilesystem/history.py\n+++ b/radicale/storage/multifilesystem/history.py\n@@ -20,0 +21 @@\n+import json\n@@ -22,2 +23 @@\n-import pickle\n-from typing import BinaryIO, Optional, cast\n+from typing import Optional\n@@ -52,4 +52,6 @@\n-            with open(os.path.join(history_folder, href), \"rb\") as f:\n-                cache_etag, history_etag = pickle.load(f)\n-        except (FileNotFoundError, pickle.UnpicklingError, ValueError) as e:\n-            if isinstance(e, (pickle.UnpicklingError, ValueError)):\n+            with open(os.path.join(history_folder, href), \"r\", encoding=\"utf-8\") as f:\n+                cache_etag, history_etag = json.load(f)\n+                if not isinstance(cache_etag, str) or not isinstance(history_etag, str):\n+                    raise ValueError(\"history cache entry must contain two strings\")\n+        except (FileNotFoundError, json.JSONDecodeError, ValueError) as e:\n+            if isinstance(e, (json.JSONDecodeError, ValueError)):\n@@ -70,3 +72,2 @@\n-                    os.path.join(history_folder, href), \"wb\") as fo:\n-                fb = cast(BinaryIO, fo)\n-                pickle.dump([etag, history_etag], fb)\n+                    os.path.join(history_folder, href), \"w\") as f:\n+                json.dump([etag, history_etag], f)\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "lock-102-B602-cddb87db82ee",
+      "test_id": "B602",
+      "path": "radicale/storage/multifilesystem/lock.py",
+      "line": 102,
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The code builds a shell command string from the configurable hook template `self._hook` and executes it with `subprocess.Popen(..., shell=True, ...)`. Although some placeholder values are passed through `shlex.quote`, the command is still interpreted by a shell, and the hook template itself controls shell syntax. This is a real shell-invocation risk, not a false positive.",
+      "evidence": [
+        {
+          "path": "radicale/storage/multifilesystem/lock.py",
+          "start_line": 86,
+          "end_line": 86
+        },
+        {
+          "path": "radicale/storage/multifilesystem/lock.py",
+          "start_line": 98,
+          "end_line": 102
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/radicale/storage/multifilesystem/lock.py\n+++ b/radicale/storage/multifilesystem/lock.py\n@@ -99 +99 @@\n-                        command, stdin=subprocess.DEVNULL,\n+                        shlex.split(command), stdin=subprocess.DEVNULL,\n@@ -102 +102 @@\n-                        shell=True, universal_newlines=True, preexec_fn=preexec_fn,\n+                        shell=False, universal_newlines=True, preexec_fn=preexec_fn,\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    },
+    {
+      "alert_id": "sync-79-B301-3cdb5b5189ae",
+      "test_id": "B301",
+      "path": "radicale/storage/multifilesystem/sync.py",
+      "line": 79,
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "label": 1,
+      "status": "classified",
+      "rationale": "The code deserializes attacker-influenced data with `pickle.load(f)` from a filesystem path derived from the client-supplied `old_token`. Although the token format is validated, the file contents are not authenticated before loading, and corrupted token files are explicitly anticipated and removed, indicating untrusted on-disk data is possible.",
+      "evidence": [
+        {
+          "path": "radicale/storage/multifilesystem/sync.py",
+          "start_line": 75,
+          "end_line": 79
+        }
+      ],
+      "remediation": {
+        "status": "accepted",
+        "diff": "--- a/radicale/storage/multifilesystem/sync.py\n+++ b/radicale/storage/multifilesystem/sync.py\n@@ -20,0 +21 @@\n+import json\n@@ -22 +22,0 @@\n-import pickle\n@@ -78,5 +78,12 @@\n-                with open(old_token_path, \"rb\") as f:\n-                    old_state = pickle.load(f)\n-            except (FileNotFoundError, pickle.UnpicklingError,\n-                    ValueError) as e:\n-                if isinstance(e, (pickle.UnpicklingError, ValueError)):\n+                with open(old_token_path, \"r\", encoding=\"utf-8\") as f:\n+                    loaded_state = json.load(f)\n+                if not isinstance(loaded_state, dict):\n+                    raise ValueError(\"invalid sync token state type\")\n+                old_state = {\n+                    str(href): str(history_etag)\n+                    for href, history_etag in loaded_state.items()\n+                }\n+            except (FileNotFoundError, json.JSONDecodeError,\n+                    UnicodeDecodeError, ValueError, TypeError) as e:\n+                if isinstance(e, (json.JSONDecodeError, UnicodeDecodeError,\n+                                  ValueError, TypeError)):\n@@ -98,3 +105,2 @@\n-                with self._atomic_write(token_path, \"wb\") as fo:  # type: ignore\n-                    fb = cast(BinaryIO, fo)\n-                    pickle.dump(state, fb)\n+                with self._atomic_write(token_path, \"w\") as fo:  # type: ignore\n+                    fo.write(json.dumps(state, separators=(\",\", \":\")))\n",
+        "checks": {
+          "applies": true,
+          "touches_flagged_line": true,
+          "clean_rescan": true
+        }
+      }
+    }
+  ]
+}

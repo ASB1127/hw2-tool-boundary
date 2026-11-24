@@ -41,6 +41,31 @@ def test_code_action_trace_records_attempted_script(tmp_path, script):
     assert events[1]["ok"] == (not script.startswith("raise"))
 
 
+def test_code_action_returns_stderr_to_model(tmp_path):
+    graph = AgentDAG(runtime=Runtime([]), kernel=Kernel(tmp_path))
+    state = {
+        "alert_id": "a",
+        "messages": [AIMessage(content=(
+            "```python\nimport sys\nprint('output')\nprint('warning', file=sys.stderr)\n```"
+        ))],
+    }
+
+    result = graph.code_action(state)
+
+    assert result["messages"][-1].content == "output\n\nstderr:\nwarning\n"
+    assert result["observations"][-1]["result"] == result["messages"][-1].content
+
+    failed = graph.code_action({
+        "alert_id": "a",
+        "messages": [AIMessage(content=(
+            "```python\nimport sys\nprint('warning', file=sys.stderr)\nraise ValueError('failed')\n```"
+        ))],
+    })
+
+    assert "ValueError: failed" in failed["messages"][-1].content
+    assert failed["messages"][-1].content.endswith("stderr:\nwarning\n")
+
+
 def test_invalid_classification_label_returns_to_controller(tmp_path):
     (tmp_path / "alert.py").write_text("x = 1\n")
     alert = {
